@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "cserrors",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CharlesJS/CSErrors",
+      "state" : {
+        "revision" : "96ba248344a3f67454ccae3076f7fc88d783c2b0",
+        "version" : "1.2.0"
+      }
+    }
+  ],
+  "version" : 2
+}
