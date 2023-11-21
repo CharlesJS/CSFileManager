@@ -18,12 +18,13 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/CharlesJS/CSErrors", from: "1.2.0")
+        .package(url: "https://github.com/CharlesJS/CSErrors", from: "1.2.2"),
+        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.3.1")
     ],
     targets: [
         .target(
             name: "CSFileManager",
-            dependencies: ["CSErrors"]
+            dependencies: ["CSErrors", "CSFileInfo"]
         ),
         .testTarget(
             name: "CSFileManagerTests",
