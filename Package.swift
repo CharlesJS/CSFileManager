@@ -1,4 +1,4 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 5.9
 
 import PackageDescription
 
@@ -16,6 +16,10 @@ let package = Package(
             name: "CSFileManager",
             targets: ["CSFileManager"]
         ),
+        .library(
+            name: "CSFileManager+Foundation",
+            targets: ["CSFileManager_Foundation"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/CharlesJS/CSErrors", from: "1.2.2"),
@@ -26,9 +30,13 @@ let package = Package(
             name: "CSFileManager",
             dependencies: ["CSErrors", "CSFileInfo"]
         ),
+        .target(
+            name: "CSFileManager_Foundation",
+            dependencies: ["CSFileManager"]
+        ),
         .testTarget(
             name: "CSFileManagerTests",
-            dependencies: ["CSFileManager"]
+            dependencies: ["CSFileManager", "CSFileManager_Foundation"]
         ),
     ]
 )

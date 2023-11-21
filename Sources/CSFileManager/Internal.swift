@@ -15,7 +15,7 @@ func emulateOSVersion(_ version: Int, closure: () throws -> Void) rethrows {
     try closure()
 }
 
-func versionCheck(_ version: Int) -> Bool { emulatedVersion >= version }
+package func versionCheck(_ version: Int) -> Bool { emulatedVersion >= version }
 #else
 @inline(__always) func versionCheck(_: Int) -> Bool { true }
 #endif

@@ -1,4 +1,5 @@
 @testable import CSFileManager
+@testable import CSFileManager_Foundation
 import CSErrors
 import System
 import XCTest
@@ -30,6 +31,7 @@ final class CSFileManagerTests: XCTestCase {
     func testTemporaryDirectory() {
         XCTAssertEqual(CSFileManager.shared.temporaryDirectory, FilePath(FileManager.default.temporaryDirectory.path))
         XCTAssertEqual(CSFileManager.shared.temporaryDirectoryStringPath, FileManager.default.temporaryDirectory.path + "/")
+        XCTAssertEqual(CSFileManager.shared.temporaryDirectoryURL, FileManager.default.temporaryDirectory)
     }
 
     func testTemporaryDirectoryFallback() {
@@ -39,6 +41,7 @@ final class CSFileManagerTests: XCTestCase {
 
         XCTAssertEqual(CSFileManager.shared.temporaryDirectory, FilePath("/tmp"))
         XCTAssertEqual(CSFileManager.shared.temporaryDirectoryStringPath, "/tmp")
+        XCTAssertEqual(CSFileManager.shared.temporaryDirectoryURL, URL(filePath: "/tmp/"))
     }
 
     func testCreateTemporaryFile() throws {
@@ -64,6 +67,17 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 32)
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+            
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL()
+        defer {
+            _ = try? handle.close()
+            _ = try? CSFileManager.shared.removeItem(at: url)
+        }
+
+        XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+        XCTAssertEqual(url.lastPathComponent.count, 32)
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
     
     func testCreateTemporaryFileWithTemplate() throws {
@@ -95,6 +109,20 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+        
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        defer {
+            _ = try? handle.close()
+            _ = try? CSFileManager.shared.removeItem(at: url)
+        }
+
+        XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+        XCTAssertEqual(url.lastPathComponent.count, 14)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
+        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
+        XCTAssertEqual(url.pathExtension, "lru")
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
     
     func testCreateTemporaryFileWithTemplateAndFallback() throws {
@@ -130,6 +158,20 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+        
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        defer {
+            _ = try? handle.close()
+            _ = try? CSFileManager.shared.removeItem(at: url)
+        }
+
+        XCTAssertTrue(url.path.starts(with: "/tmp/"))
+        XCTAssertEqual(url.lastPathComponent.count, 14)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
+        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
+        XCTAssertEqual(url.pathExtension, "lru")
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
 
     func testCreateTemporaryFileWithTemplateAndNoSlashOnTMPDIR() throws {
@@ -165,6 +207,20 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+        
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        defer {
+            _ = try? handle.close()
+            _ = try? CSFileManager.shared.removeItem(at: url)
+        }
+
+        XCTAssertTrue(url.path.starts(with: "/tmp/"))
+        XCTAssertEqual(url.lastPathComponent.count, 14)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
+        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
+        XCTAssertEqual(url.pathExtension, "lru")
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
 
     func testCreateTemporaryFileFailure() throws {
@@ -181,6 +237,7 @@ final class CSFileManagerTests: XCTestCase {
         func checkType(path: FilePath, expect expectedType: CSFileManager.FileType, canOpen: Bool = true) throws {
             try XCTAssertEqual(CSFileManager.shared.typeOfItem(at: path), expectedType)
             try XCTAssertEqual(CSFileManager.shared.typeOfItem(atPath: path.string), expectedType)
+            try XCTAssertEqual(CSFileManager.shared.typeOfItem(at: URL(filePath: path.string)), expectedType)
 
             if canOpen {
                 let desc = try FileDescriptor.open(path, .readOnly, options: .symlink)
@@ -208,6 +265,14 @@ final class CSFileManagerTests: XCTestCase {
         try XCTAssertEqual(CSFileManager.shared.typeOfItem(fileDescriptor: socket), .socket)
 
         XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(at: "/this/should/not/exist")) {
+            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(atPath: "/this/should/not/exist")) {
+            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(at: URL(filePath: "/this/should/not/exist"))) {
             XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
         }
     }
@@ -249,10 +314,43 @@ final class CSFileManagerTests: XCTestCase {
                 childName2, "\(childName2)/\(grandchildName3)"
             ]
         )
+
+        XCTAssertEqual(
+            try Set(manager.contentsOfDirectory(at: URL(filePath: root.string))),
+            [
+                URL(filePath: child1.string, directoryHint: .isDirectory),
+                URL(filePath: child2.string, directoryHint: .isDirectory)
+            ]
+        )
+        XCTAssertEqual(
+            try Set(manager.contentsOfDirectory(at: URL(filePath: child1.string))),
+            [
+                URL(filePath: grandchild1.string, directoryHint: .isDirectory),
+                URL(filePath: grandchild2.string, directoryHint: .isDirectory)
+            ]
+        )
+        XCTAssertEqual(
+            try Set(manager.contentsOfDirectory(at: URL(filePath: child2.string))),
+            [URL(filePath: grandchild3, directoryHint: .isDirectory)]
+        )
+        XCTAssertEqual(
+            try Set(manager.contentsOfDirectory(at: URL(filePath: root.string), recursively: true)),
+            [
+                URL(filePath: child1.string, directoryHint: .isDirectory),
+                URL(filePath: child1.string).appending(path: grandchildName1, directoryHint: .isDirectory),
+                URL(filePath: child1.string).appending(path: grandchildName2, directoryHint: .isDirectory),
+                URL(filePath: child2.string, directoryHint: .isDirectory),
+                URL(filePath: child2.string).appending(path: grandchildName3, directoryHint: .isDirectory)
+            ]
+        )
     }
 
     func testEnumerateNonexistentPath() {
-        XCTAssertEqual(try Set(CSFileManager.shared.contentsOfDirectory(atPath: "/does/not/exist/\(UUID().uuidString)")), [])
+        let nonexistentPath = FilePath("/does/not/exist/\(UUID().uuidString)")
+
+        XCTAssertEqual(try Set(CSFileManager.shared.contentsOfDirectory(atPath: nonexistentPath.string)), [])
+        XCTAssertEqual(try Set(CSFileManager.shared.contentsOfDirectory(at: nonexistentPath)), [])
+        XCTAssertEqual(try Set(CSFileManager.shared.contentsOfDirectory(at: URL(filePath: nonexistentPath.string))), [])
     }
 
     func testCreateDirectory() throws {
@@ -299,6 +397,28 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: deepDir)[.posixPermissions] as? mode_t, 0o700)
     }
 
+    func testCreateDirectoryWithURLs() throws {
+        let testDir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { _ = try? FileManager.default.removeItem(at: testDir) }
+
+        XCTAssertThrowsError(try testDir.checkResourceIsReachable())
+        try CSFileManager.shared.createDirectory(at: testDir, mode: 0o755, recursively: false)
+        XCTAssertTrue(try testDir.checkResourceIsReachable())
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: testDir.path)[.posixPermissions] as? mode_t, 0o755)
+
+        let midDir = testDir.appending(path: UUID().uuidString)
+        let deepDir = midDir.appending(path: UUID().uuidString)
+        XCTAssertThrowsError(try CSFileManager.shared.createDirectory(at: deepDir, recursively: false)) {
+            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+        }
+        XCTAssertThrowsError(try midDir.checkResourceIsReachable())
+        XCTAssertThrowsError(try deepDir.checkResourceIsReachable())
+        try CSFileManager.shared.createDirectory(at: deepDir, mode: 0o700, recursively: true)
+        XCTAssertTrue(try deepDir.checkResourceIsReachable())
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: midDir.path)[.posixPermissions] as? mode_t, 0o700)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: deepDir.path)[.posixPermissions] as? mode_t, 0o700)
+    }
+
     func testRemoveRegularFile() throws {
         let testDir = CSFileManager.shared.temporaryDirectory.appending(UUID().uuidString)
         try CSFileManager.shared.createDirectory(at: testDir, mode: 0o755, recursively: false)
@@ -324,6 +444,16 @@ final class CSFileManagerTests: XCTestCase {
         try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: child.string))
         XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
+        XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
+        
+        try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: child.string))
+        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
+        try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: false)
+        XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
+        
+        try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: child.string))
+        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
+        try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: true)
         XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
     }
 
@@ -353,6 +483,16 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
         XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
+        
+        try CSFileManager.shared.createDirectory(at: child)
+        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
+        try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: false)
+        XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
+        
+        try CSFileManager.shared.createDirectory(at: child)
+        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
+        try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: true)
+        XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
     }
 
     func testRemoveDirectoryWithContents() throws {
@@ -373,8 +513,10 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertThrowsError(try CSFileManager.shared.removeItem(at: child, recursively: false)) {
             XCTAssertEqual($0 as? Errno, .directoryNotEmpty)
         }
-        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
         XCTAssertThrowsError(try CSFileManager.shared.removeItem(atPath: child.string, recursively: false)) {
+            XCTAssertEqual($0 as? Errno, .directoryNotEmpty)
+        }
+        XCTAssertThrowsError(try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: false)) {
             XCTAssertEqual($0 as? Errno, .directoryNotEmpty)
         }
         XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
@@ -386,6 +528,12 @@ final class CSFileManagerTests: XCTestCase {
         try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: grandchild.string))
         XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
+        XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
+        
+        try CSFileManager.shared.createDirectory(at: child)
+        try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: grandchild.string))
+        XCTAssertTrue(try URL(filePath: child.string).checkResourceIsReachable())
+        try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: true)
         XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
     }
 
@@ -561,6 +709,33 @@ final class CSFileManagerTests: XCTestCase {
         try CSFileManager.shared.replaceItem(
             atPath: file1.string,
             withItemAtPath: file2.string,
+            options: .usingNewMetadataOnly
+        )
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName1])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName1), xattrValue1)
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(at: URL(filePath: file1.string), withItemAt: URL(filePath: file2.string))
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName1])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName1), xattrValue1)
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            at: URL(filePath: file1.string),
+            withItemAt: URL(filePath: file2.string),
             options: .usingNewMetadataOnly
         )
         XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
