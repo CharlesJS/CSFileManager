@@ -13,6 +13,7 @@ final class CSFileManagerTests: XCTestCase {
                 self.testTemporaryDirectoryFallback()
                 try self.testCreateTemporaryFile()
                 try self.testCreateTemporaryFileWithTemplate()
+                try self.testCreateTemporaryFileWithTemplateAndSuffix()
                 try self.testCreateTemporaryFileWithTemplateAndFallback()
                 try self.testCreateTemporaryFileWithTemplateAndNoSlashOnTMPDIR()
                 try self.testCreateTemporaryFileFailure()
@@ -20,6 +21,7 @@ final class CSFileManagerTests: XCTestCase {
                 try self.testContentsOfDirectory()
                 try self.testCreateDirectory()
                 try self.testCreateDirectoryWithStringPaths()
+                try self.testCreateDirectoryWithURLs()
                 try self.testRemoveRegularFile()
                 try self.testRemoveEmptyDirectory()
                 try self.testRemoveDirectoryWithContents()
@@ -81,7 +83,52 @@ final class CSFileManagerTests: XCTestCase {
     }
     
     func testCreateTemporaryFileWithTemplate() throws {
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXbar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX")
+        defer {
+            _ = try? desc.close()
+            _ = try? CSFileManager.shared.removeItem(at: path)
+        }
+
+        XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectory))
+        XCTAssertEqual(path.lastComponent?.string.count, 8)
+        XCTAssertEqual(path.lastComponent?.string.prefix(3), "foo")
+        XCTAssertNotEqual(path.lastComponent?.string.suffix(5), "XXXXX")
+        XCTAssertNil(path.extension)
+        try desc.writeAll("Foo Bar".data(using: .ascii)!)
+
+        XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii)!, "Foo Bar")
+
+        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(template: "quxXXX")
+        defer {
+            close(fdInt)
+            _ = try? CSFileManager.shared.removeItem(atPath: pathString)
+        }
+
+        XCTAssertTrue(pathString.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+        XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 6)
+        XCTAssertEqual(URL(filePath: pathString).lastPathComponent.prefix(3), "qux")
+        XCTAssertNotEqual(URL(filePath: pathString).lastPathComponent.suffix(3), "XXX")
+        XCTAssertEqual(URL(filePath: pathString).pathExtension, "")
+        XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
+        XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+        
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX")
+        defer {
+            _ = try? handle.close()
+            _ = try? CSFileManager.shared.removeItem(at: url)
+        }
+
+        XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+        XCTAssertEqual(url.lastPathComponent.count, 8)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "foo")
+        XCTAssertNotEqual(url.lastPathComponent.suffix(5), "XXXXX")
+        XCTAssertEqual(url.pathExtension, "")
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
+    }
+
+    func testCreateTemporaryFileWithTemplateAndSuffix() throws {
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? desc.close()
             _ = try? CSFileManager.shared.removeItem(at: path)
@@ -90,13 +137,17 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectory))
         XCTAssertEqual(path.lastComponent?.string.count, 15)
         XCTAssertEqual(path.lastComponent?.string.prefix(3), "foo")
+        XCTAssertNotEqual(path.lastComponent?.string.prefix(8).suffix(5), "XXXXX")
         XCTAssertEqual(path.lastComponent?.string.suffix(7), "bar.baz")
         XCTAssertEqual(path.extension, "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii)!, "Foo Bar")
 
-        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(template: "quxXXXquux.foo")
+        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
+            template: "quxXXX",
+            suffix: "quux.foo"
+        )
         defer {
             close(fdInt)
             _ = try? CSFileManager.shared.removeItem(atPath: pathString)
@@ -105,22 +156,24 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(pathString.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 14)
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.prefix(3), "qux")
+        XCTAssertNotEqual(URL(filePath: pathString).lastPathComponent.prefix(6).suffix(3), "XXX")
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.suffix(8), "quux.foo")
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
         
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? handle.close()
             _ = try? CSFileManager.shared.removeItem(at: url)
         }
 
         XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
-        XCTAssertEqual(url.lastPathComponent.count, 14)
-        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
-        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
-        XCTAssertEqual(url.pathExtension, "lru")
+        XCTAssertEqual(url.lastPathComponent.count, 15)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "foo")
+        XCTAssertNotEqual(url.lastPathComponent.prefix(8).suffix(5), "XXXXX")
+        XCTAssertEqual(url.lastPathComponent.suffix(7), "bar.baz")
+        XCTAssertEqual(url.pathExtension, "baz")
         try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
         XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
@@ -130,7 +183,7 @@ final class CSFileManagerTests: XCTestCase {
         defer { setenv("TMPDIR", oldTmpDir, 1) }
         unsetenv("TMPDIR")
 
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXbar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? desc.close()
             _ = try? CSFileManager.shared.removeItem(at: path)
@@ -139,13 +192,17 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(path.starts(with: "/tmp/"))
         XCTAssertEqual(path.lastComponent?.string.count, 15)
         XCTAssertEqual(path.lastComponent?.string.prefix(3), "foo")
+        XCTAssertNotEqual(path.lastComponent?.string.prefix(8).suffix(5), "XXXXX")
         XCTAssertEqual(path.lastComponent?.string.suffix(7), "bar.baz")
         XCTAssertEqual(path.extension, "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii)!, "Foo Bar")
 
-        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(template: "quxXXXquux.foo")
+        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
+            template: "quxXXX",
+            suffix: "quux.foo"
+        )
         defer {
             close(fdInt)
             _ = try? CSFileManager.shared.removeItem(atPath: pathString)
@@ -154,22 +211,24 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(pathString.starts(with: "/tmp/"))
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 14)
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.prefix(3), "qux")
+        XCTAssertNotEqual(URL(filePath: pathString).lastPathComponent.prefix(6).suffix(3), "XXX")
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.suffix(8), "quux.foo")
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
         
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? handle.close()
             _ = try? CSFileManager.shared.removeItem(at: url)
         }
 
         XCTAssertTrue(url.path.starts(with: "/tmp/"))
-        XCTAssertEqual(url.lastPathComponent.count, 14)
-        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
-        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
-        XCTAssertEqual(url.pathExtension, "lru")
+        XCTAssertEqual(url.lastPathComponent.count, 15)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "foo")
+        XCTAssertNotEqual(url.lastPathComponent.prefix(8).suffix(5), "XXXXX")
+        XCTAssertEqual(url.lastPathComponent.suffix(7), "bar.baz")
+        XCTAssertEqual(url.pathExtension, "baz")
         try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
         XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
@@ -179,7 +238,7 @@ final class CSFileManagerTests: XCTestCase {
         defer { setenv("TMPDIR", oldTmpDir, 1) }
         setenv("TMPDIR", "/tmp", 1)
 
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXbar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? desc.close()
             _ = try? CSFileManager.shared.removeItem(at: path)
@@ -188,13 +247,17 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(path.starts(with: "/tmp/"))
         XCTAssertEqual(path.lastComponent?.string.count, 15)
         XCTAssertEqual(path.lastComponent?.string.prefix(3), "foo")
+        XCTAssertNotEqual(path.lastComponent?.string.prefix(8).suffix(5), "XXXXX")
         XCTAssertEqual(path.lastComponent?.string.suffix(7), "bar.baz")
         XCTAssertEqual(path.extension, "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii)!, "Foo Bar")
 
-        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(template: "quxXXXquux.foo")
+        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
+            template: "quxXXX",
+            suffix: "quux.foo"
+        )
         defer {
             close(fdInt)
             _ = try? CSFileManager.shared.removeItem(atPath: pathString)
@@ -203,22 +266,23 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(pathString.starts(with: "/tmp/"))
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 14)
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.prefix(3), "qux")
+        XCTAssertNotEqual(URL(filePath: pathString).lastPathComponent.prefix(6).suffix(3), "XXX")
         XCTAssertEqual(URL(filePath: pathString).lastPathComponent.suffix(8), "quux.foo")
         XCTAssertEqual(URL(filePath: pathString).pathExtension, "foo")
         XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
         XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
         
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "urlXXXurrl.lru")
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
         defer {
             _ = try? handle.close()
             _ = try? CSFileManager.shared.removeItem(at: url)
         }
 
         XCTAssertTrue(url.path.starts(with: "/tmp/"))
-        XCTAssertEqual(url.lastPathComponent.count, 14)
-        XCTAssertEqual(url.lastPathComponent.prefix(3), "url")
-        XCTAssertEqual(url.lastPathComponent.suffix(8), "urrl.lru")
-        XCTAssertEqual(url.pathExtension, "lru")
+        XCTAssertEqual(url.lastPathComponent.count, 15)
+        XCTAssertEqual(url.lastPathComponent.prefix(3), "foo")
+        XCTAssertEqual(url.lastPathComponent.suffix(7), "bar.baz")
+        XCTAssertEqual(url.pathExtension, "baz")
         try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
         XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }

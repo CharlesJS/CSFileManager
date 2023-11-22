@@ -69,15 +69,17 @@ public struct CSFileManager {
         } ?? "/tmp"
     }
 
+    private static let defaultTemplate = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
-    public func createTemporaryFile(template t: String? = nil) throws -> (FileDescriptor, FilePath) {
-        let template = t ?? "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    public func createTemporaryFile(template t: String? = nil, suffix: String? = nil) throws -> (FileDescriptor, FilePath) {
+        let template = t ?? Self.defaultTemplate
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             let templatePath = String(decoding: self.temporaryDirectory) + "/" + template
 
             return try templatePath.withCString {
-                try self.createTemporaryFile(templatePath: $0) { fd, path in
+                try self.createTemporaryFile(templatePath: $0, suffix: suffix) { fd, path in
                     (FileDescriptor(rawValue: fd), FilePath(String(cString: path)))
                 }
             }
@@ -86,13 +88,13 @@ public struct CSFileManager {
         let templatePath = self.temporaryDirectory.appending(template)
 
         return try templatePath.withPlatformString {
-            try self.createTemporaryFile(templatePath: $0) { fd, path in
+            try self.createTemporaryFile(templatePath: $0, suffix: suffix) { fd, path in
                 (FileDescriptor(rawValue: fd), FilePath(platformString: path))
             }
         }
     }
 
-    public func createTemporaryFileWithStringPath(template: String? = nil) throws -> (Int32, String) {
+    public func createTemporaryFileWithStringPath(template: String? = nil, suffix: String? = nil) throws -> (Int32, String) {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             var tempDir = self.temporaryDirectoryStringPath
 
@@ -100,16 +102,16 @@ public struct CSFileManager {
                 tempDir.append("/")
             }
 
-            let templatePath = "\(tempDir)\(template ?? "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")"
+            let templatePath = "\(tempDir)\(template ?? Self.defaultTemplate)"
 
             return try templatePath.withCString {
-                try self.createTemporaryFile(templatePath: $0) { fd, path in
+                try self.createTemporaryFile(templatePath: $0, suffix: suffix) { fd, path in
                     (fd, String(cString: path))
                 }
             }
         }
 
-        let (desc, path) = try self.createTemporaryFile(template: template)
+        let (desc, path) = try self.createTemporaryFile(template: template, suffix: suffix)
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             return (desc.rawValue, String(decoding: path))
@@ -120,18 +122,28 @@ public struct CSFileManager {
 
     private func createTemporaryFile<T>(
         templatePath: UnsafePointer<CChar>,
+        suffix: UnsafePointer<CChar>?,
         handler: (Int32, UnsafePointer<CChar>) -> T
     ) throws -> T {
         let old_mask = umask(0o077)
         defer { umask(old_mask) }
 
         let pathLen = strlen(templatePath)
-        let path = UnsafeMutablePointer<CChar>.allocate(capacity: pathLen + 1)
+        let suffixLen = suffix.map { strlen($0) } ?? 0
+        let path = UnsafeMutablePointer<CChar>.allocate(capacity: pathLen + suffixLen + 1)
         defer { path.deallocate() }
 
         path.initialize(from: templatePath, count: pathLen + 1)
 
-        let fd = mkstemp(path)
+        let fd: Int32
+        if let suffix {
+            (path + pathLen).initialize(from: suffix, count: suffixLen + 1)
+
+            fd = mkstemps(path, Int32(suffixLen))
+        } else {
+            fd = mkstemp(path)
+        }
+
         guard fd >= 0 else {
             throw errno()
         }

@@ -22,14 +22,14 @@ extension CSFileManager {
         return URL(fileURLWithPath: self.temporaryDirectory.string, isDirectory: true)
     }
 
-    public func createTemporaryFileURL(template: String? = nil) throws -> (FileHandle, URL) {
+    public func createTemporaryFileURL(template: String? = nil, suffix: String? = nil) throws -> (FileHandle, URL) {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
-            let (fd, path) = try self.createTemporaryFileWithStringPath(template: template)
+            let (fd, path) = try self.createTemporaryFileWithStringPath(template: template, suffix: suffix)
 
             return (FileHandle(fileDescriptor: fd), URL(fileURLWithPath: path))
         }
 
-        let (fd, path) = try self.createTemporaryFile(template: template)
+        let (fd, path) = try self.createTemporaryFile(template: template, suffix: suffix)
         
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
             return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: String(describing: path)))
