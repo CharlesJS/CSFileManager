@@ -50,6 +50,7 @@ public struct CSFileManager {
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
         static let usingNewMetadataOnly = ItemReplacementOptions(rawValue: 1)
+        static let withoutDeletingBackupItem = ItemReplacementOptions(rawValue: 2)
     }
 
     public static let shared = CSFileManager()
@@ -386,10 +387,31 @@ public struct CSFileManager {
         }
 
         try self.replaceItem(at: FilePath(originalPath), withItemAt: FilePath(newPath), options: options)
-        return
    }
 
     private func replaceItem(
+        path: String,
+        originalCPath: UnsafePointer<CChar>,
+        originalInfo: FileInfo,
+        newCPath: UnsafePointer<CChar>,
+        newInfo: FileInfo,
+        options: ItemReplacementOptions
+    ) throws {
+        try self._replaceItem(
+            path: path,
+            originalCPath: originalCPath,
+            originalInfo: originalInfo,
+            newCPath: newCPath,
+            newInfo: newInfo,
+            options: options
+        )
+
+        if !options.contains(.withoutDeletingBackupItem) {
+            try callPOSIXFunction(expect: .zero) { unlink(newCPath) }
+        }
+    }
+
+    private func _replaceItem(
         path: String,
         originalCPath: UnsafePointer<CChar>,
         originalInfo: FileInfo,
@@ -422,7 +444,7 @@ public struct CSFileManager {
         options: ItemReplacementOptions
     ) throws {
         if !options.contains(.usingNewMetadataOnly) {
-            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false)
+            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
         }
 
         _ = try callPOSIXFunction(expect: .zero, path: path) {
@@ -441,31 +463,40 @@ public struct CSFileManager {
         }
 
         if options.contains(.usingNewMetadataOnly) {
+            let preserveBackup = options.contains(.withoutDeletingBackupItem)
+
             let origFd = try callPOSIXFunction(expect: .nonNegative) { open(originalCPath, O_RDWR) }
             defer { close(origFd) }
 
             let newFd = try callPOSIXFunction(expect: .nonNegative) { open(newCPath, O_RDWR) }
             defer { close(newFd) }
 
-            let (tempFd, tempPath) = try self.createTemporaryFileWithStringPath()
+            let (tempFd, tempPath) = preserveBackup ? try self.createTemporaryFileWithStringPath() : (-1, "")
             defer {
-                close(tempFd)
-                try? self.removeItem(atPath: tempPath)
+                if tempFd >= 0 {
+                    close(tempFd)
+                    try? self.removeItem(atPath: tempPath)
+                }
             }
 
-            try callPOSIXFunction(expect: .zero, path: path) {
-                fcopyfile(origFd, tempFd, nil, copyfile_flags_t(COPYFILE_XATTR))
+            if preserveBackup {
+                try callPOSIXFunction(expect: .zero, path: path) {
+                    fcopyfile(origFd, tempFd, nil, copyfile_flags_t(COPYFILE_XATTR))
+                }
             }
 
             try callPOSIXFunction(expect: .zero, path: path) {
                 fcopyfile(newFd, origFd, nil, copyfile_flags_t(COPYFILE_XATTR))
             }
 
-            try callPOSIXFunction(expect: .zero, path: path) {
-                fcopyfile(tempFd, newFd, nil, copyfile_flags_t(COPYFILE_XATTR))
+            if preserveBackup {
+                try callPOSIXFunction(expect: .zero, path: path) {
+                    fcopyfile(tempFd, newFd, nil, copyfile_flags_t(COPYFILE_XATTR))
+                }
             }
         } else {
-            try self.copyMetadata(path: path, from: newCPath, to: originalCPath, swap: true)
+            let preserveFrom = options.contains(.withoutDeletingBackupItem)
+            try self.copyMetadata(path: path, from: newCPath, to: originalCPath, swap: true, preserveFrom: preserveFrom)
         }
     }
 
@@ -476,7 +507,7 @@ public struct CSFileManager {
         options: ItemReplacementOptions
     ) throws {
         if !options.contains(.usingNewMetadataOnly) {
-            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false)
+            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
         }
 
         let len = strlen(newCPath)
@@ -502,7 +533,13 @@ public struct CSFileManager {
         try callPOSIXFunction(expect: .zero, path: path) { rename(tempPath, newCPath) }
     }
 
-    private func copyMetadata(path: String, from: UnsafePointer<CChar>, to: UnsafePointer<CChar>, swap: Bool) throws {
+    private func copyMetadata(
+        path: String,
+        from: UnsafePointer<CChar>,
+        to: UnsafePointer<CChar>,
+        swap: Bool,
+        preserveFrom: Bool
+    ) throws {
         let get: (UnsafePointer<CChar>) throws -> [ExtendedAttribute]
         let set: (Set<ExtendedAttribute>, UnsafePointer<CChar>) throws -> Void
         let remove: ([String], UnsafePointer<CChar>) throws -> Void
@@ -536,7 +573,7 @@ public struct CSFileManager {
 
         try set(newDstAttrs, to)
 
-        if let newSrcAttrs {
+        if let newSrcAttrs, preserveFrom {
             if !newSrcAttrs.isEmpty {
                 try set(newSrcAttrs, from)
             }

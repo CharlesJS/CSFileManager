@@ -739,6 +739,19 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(at: file1, withItemAt: file2, options: .withoutDeletingBackupItem)
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
         XCTAssertEqual(try xattrNames(at: file2), [xattrName1])
         XCTAssertEqual(try xattr(at: file2, forKey: xattrName1), xattrValue1)
 
@@ -750,6 +763,22 @@ final class CSFileManagerTests: XCTestCase {
         try CSFileManager.shared.replaceItem(at: file1, withItemAt: file2, options: .usingNewMetadataOnly)
         XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            at: file1,
+            withItemAt: file2,
+            options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
+        )
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
         XCTAssertEqual(try xattrNames(at: file2), [xattrName1])
         XCTAssertEqual(try xattr(at: file2, forKey: xattrName1), xattrValue1)
 
@@ -759,6 +788,23 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
         XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
         try CSFileManager.shared.replaceItem(atPath: file1.string, withItemAtPath: file2.string)
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            atPath: file1.string,
+            withItemAtPath: file2.string,
+            options: .withoutDeletingBackupItem
+        )
         XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
@@ -777,6 +823,22 @@ final class CSFileManagerTests: XCTestCase {
         )
         XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            atPath: file1.string,
+            withItemAtPath: file2.string,
+            options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
+        )
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
         XCTAssertEqual(try xattrNames(at: file2), [xattrName1])
         XCTAssertEqual(try xattr(at: file2, forKey: xattrName1), xattrValue1)
         
@@ -786,6 +848,23 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
         XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
         try CSFileManager.shared.replaceItem(at: URL(filePath: file1.string), withItemAt: URL(filePath: file2.string))
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            at: URL(filePath: file1.string),
+            withItemAt: URL(filePath: file2.string),
+            options: .withoutDeletingBackupItem
+        )
         XCTAssertEqual(try xattrNames(at: file1), [xattrName1, xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
@@ -801,6 +880,22 @@ final class CSFileManagerTests: XCTestCase {
             at: URL(filePath: file1.string),
             withItemAt: URL(filePath: file2.string),
             options: .usingNewMetadataOnly
+        )
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
+        XCTAssertThrowsError(try URL(filePath: file2.string).checkResourceIsReachable()) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadNoSuchFile)
+        }
+        
+        try setUpFiles()
+        XCTAssertEqual(try xattrNames(at: file1), [xattrName1])
+        XCTAssertEqual(try xattr(at: file1, forKey: xattrName1), xattrValue1)
+        XCTAssertEqual(try xattrNames(at: file2), [xattrName2])
+        XCTAssertEqual(try xattr(at: file2, forKey: xattrName2), xattrValue2)
+        try CSFileManager.shared.replaceItem(
+            at: URL(filePath: file1.string),
+            withItemAt: URL(filePath: file2.string),
+            options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
         )
         XCTAssertEqual(try xattrNames(at: file1), [xattrName2])
         XCTAssertEqual(try xattr(at: file1, forKey: xattrName2), xattrValue2)
