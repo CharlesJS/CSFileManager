@@ -38,6 +38,14 @@ extension CSFileManager {
         return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: path.string))
     }
 
+    public func itemIsReachable(at url: URL) throws -> Bool {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
+            return try self.itemIsReachable(atPath: url.path)
+        }
+
+        return try self.itemIsReachable(at: FilePath(url.path))
+    }
+
     public func typeOfItem(at url: URL) throws -> FileType {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
             return try self.typeOfItem(atPath: url.path)

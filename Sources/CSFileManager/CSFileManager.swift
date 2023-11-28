@@ -153,6 +153,33 @@ public struct CSFileManager {
     }
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func itemIsReachable(at path: FilePath) throws -> Bool {
+        do {
+            _ = try self.typeOfItem(at: path)
+            return true
+        } catch {
+            if error.isFileNotFoundError {
+                return false
+            }
+
+            throw error
+        }
+    }
+
+    public func itemIsReachable(atPath path: String) throws -> Bool {
+        do {
+            _ = try self.typeOfItem(atPath: path)
+            return true
+        } catch {
+            if error.isFileNotFoundError {
+                return false
+            }
+
+            throw error
+        }
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func typeOfItem(at path: FilePath) throws -> FileType {
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             return try path.withCString { try self.typeOfItem(path: String(decoding: path), cPath: $0) }

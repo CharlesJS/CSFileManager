@@ -17,6 +17,9 @@ final class CSFileManagerTests: XCTestCase {
                 try self.testCreateTemporaryFileWithTemplateAndFallback()
                 try self.testCreateTemporaryFileWithTemplateAndNoSlashOnTMPDIR()
                 try self.testCreateTemporaryFileFailure()
+                self.testReachablePaths()
+                self.testUnreachablePaths()
+                try self.testReachabilityCheckError()
                 try self.testGetTypeOfItem()
                 try self.testContentsOfDirectory()
                 try self.testCreateDirectory()
@@ -294,6 +297,54 @@ final class CSFileManagerTests: XCTestCase {
 
         XCTAssertThrowsError(try CSFileManager.shared.createTemporaryFileWithStringPath(template: "nonexist/dir/XXXX")) {
             XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+        }
+    }
+
+    func testReachablePaths() {
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: "/bin/ls"))
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(atPath: "/bin/ls"))
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: URL(filePath: "/bin/ls")))
+
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: "/usr/bin"))
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(atPath: "/usr/bin"))
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: URL(filePath: "/usr/bin")))
+    }
+
+    func testUnreachablePaths() {
+        let bogusPath = "/bin/does_not_exist.\(UUID().uuidString)"
+
+        XCTAssertFalse(try CSFileManager.shared.itemIsReachable(at: FilePath(bogusPath)))
+        XCTAssertFalse(try CSFileManager.shared.itemIsReachable(atPath: bogusPath))
+        XCTAssertFalse(try CSFileManager.shared.itemIsReachable(at: URL(filePath: bogusPath)))
+    }
+
+    func testReachabilityCheckError() throws {
+        let noPermissionsDir = CSFileManager.shared.temporaryDirectory.appending(UUID().uuidString)
+        let unreachableFile = noPermissionsDir.appending("unreachable.file")
+
+        try CSFileManager.shared.createDirectory(at: noPermissionsDir)
+        defer { 
+            chmod(noPermissionsDir.string, 0o755)
+            _ = try? CSFileManager.shared.removeItem(at: noPermissionsDir, recursively: true)
+        }
+
+        try Data().write(to: URL(filePath: unreachableFile.string))
+
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: unreachableFile))
+        XCTAssertTrue(try CSFileManager.shared.itemIsReachable(atPath: unreachableFile.string))
+
+        try callPOSIXFunction(expect: .zero) { chmod(noPermissionsDir.string, 0o400) }
+
+        XCTAssertThrowsError(try CSFileManager.shared.itemIsReachable(at: unreachableFile)) {
+            XCTAssertTrue($0.isPermissionError)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.itemIsReachable(atPath: unreachableFile.string)) {
+            XCTAssertTrue($0.isPermissionError)
+        }
+
+        XCTAssertThrowsError(try CSFileManager.shared.itemIsReachable(at: URL(filePath: unreachableFile.string))) {
+            XCTAssertTrue($0.isPermissionError)
         }
     }
 
