@@ -1,3 +1,5 @@
+import CSFileInfo
+import CSFileInfo_Foundation
 @testable import CSFileManager
 @testable import CSFileManager_Foundation
 import CSErrors
@@ -25,11 +27,55 @@ final class CSFileManagerTests: XCTestCase {
                 try self.testCreateDirectory()
                 try self.testCreateDirectoryWithStringPaths()
                 try self.testCreateDirectoryWithURLs()
+                try self.testMoveItems()
                 try self.testRemoveRegularFile()
                 try self.testRemoveEmptyDirectory()
                 try self.testRemoveDirectoryWithContents()
-                try self.testReplaceItemsOnSameVolume()
+                try self.testReplaceItems()
             }
+        }
+    }
+
+    private struct DiskImage {
+        let imageURL: URL
+        let mountPoint: URL
+        let devEntry: URL
+        let supportResourceFork: Bool
+    }
+    private static var diskImages: [String : DiskImage] = [:]
+
+    override class func setUp() {
+        do {
+            let tempURL = FileManager.default.temporaryDirectory
+            let fileSystems = ["APFS", "HFS+", "ExFAT"]
+
+            self.diskImages = try fileSystems.reduce(into: [:]) { diskImages, eachFS in
+                let dmgURL = try self.createDiskImage(fs: eachFS, at: tempURL.appending(path: UUID().uuidString), megabytes: 10)
+
+                let (mountPoint: mountPoint, devEntry: devEntry) = try self.mountDiskImage(at: dmgURL)
+
+                let rsrcFork = !["ExFAT"].contains(eachFS)
+
+                diskImages[eachFS] = DiskImage(
+                    imageURL: dmgURL,
+                    mountPoint: mountPoint,
+                    devEntry: devEntry,
+                    supportResourceFork: rsrcFork
+                )
+            }
+        } catch {
+            XCTFail(error.localizedDescription)
+        }
+    }
+
+    override class func tearDown() {
+        do {
+            for eachDMG in self.diskImages.values {
+                try self.unmountDiskImage(at: eachDMG.devEntry)
+                try FileManager.default.removeItem(at: eachDMG.imageURL)
+            }
+        } catch {
+            XCTFail(error.localizedDescription)
         }
     }
 
@@ -292,11 +338,11 @@ final class CSFileManagerTests: XCTestCase {
 
     func testCreateTemporaryFileFailure() throws {
         XCTAssertThrowsError(try CSFileManager.shared.createTemporaryFile(template: "nonexist/dir/XXXX")) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
 
         XCTAssertThrowsError(try CSFileManager.shared.createTemporaryFileWithStringPath(template: "nonexist/dir/XXXX")) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
     }
 
@@ -380,15 +426,15 @@ final class CSFileManagerTests: XCTestCase {
         try XCTAssertEqual(CSFileManager.shared.typeOfItem(fileDescriptor: socket), .socket)
 
         XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(at: "/this/should/not/exist")) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
         
         XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(atPath: "/this/should/not/exist")) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
         
         XCTAssertThrowsError(try CSFileManager.shared.typeOfItem(at: URL(filePath: "/this/should/not/exist"))) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
     }
     
@@ -480,7 +526,7 @@ final class CSFileManagerTests: XCTestCase {
         let midDir = testDir.appending(UUID().uuidString)
         let deepDir = midDir.appending(UUID().uuidString)
         XCTAssertThrowsError(try CSFileManager.shared.createDirectory(at: deepDir, recursively: false)) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
         XCTAssertThrowsError(try URL(filePath: midDir.string).checkResourceIsReachable())
         XCTAssertThrowsError(try URL(filePath: deepDir.string).checkResourceIsReachable())
@@ -502,7 +548,7 @@ final class CSFileManagerTests: XCTestCase {
         let midDir = FilePath(testDir).appending(UUID().uuidString).string
         let deepDir = FilePath(midDir).appending(UUID().uuidString).string
         XCTAssertThrowsError(try CSFileManager.shared.createDirectory(atPath: deepDir, recursively: false)) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
         XCTAssertThrowsError(try URL(filePath: midDir).checkResourceIsReachable())
         XCTAssertThrowsError(try URL(filePath: deepDir).checkResourceIsReachable())
@@ -524,7 +570,7 @@ final class CSFileManagerTests: XCTestCase {
         let midDir = testDir.appending(path: UUID().uuidString)
         let deepDir = midDir.appending(path: UUID().uuidString)
         XCTAssertThrowsError(try CSFileManager.shared.createDirectory(at: deepDir, recursively: false)) {
-            XCTAssertEqual($0 as? Errno, .noSuchFileOrDirectory)
+            XCTAssertTrue($0.isFileNotFoundError)
         }
         XCTAssertThrowsError(try midDir.checkResourceIsReachable())
         XCTAssertThrowsError(try deepDir.checkResourceIsReachable())
@@ -532,6 +578,114 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertTrue(try deepDir.checkResourceIsReachable())
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: midDir.path)[.posixPermissions] as? mode_t, 0o700)
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: deepDir.path)[.posixPermissions] as? mode_t, 0o700)
+    }
+
+    func testMoveItems() throws {
+        for image1 in Self.diskImages.values {
+            for image2 in Self.diskImages.values {
+                let rsrcFork = image1.supportResourceFork && image2.supportResourceFork
+                try self.testMoveItems(fromVolume: image1.mountPoint, toVolume: image2.mountPoint, testRsrcFork: rsrcFork)
+            }
+        }
+    }
+
+    private func testMoveItems(fromVolume vol1: URL, toVolume vol2: URL, testRsrcFork: Bool) throws {
+        let test1 = vol1.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: test1, withIntermediateDirectories: true)
+        defer { _ = try? FileManager.default.removeItem(at: test1) }
+
+        let test2 = vol1.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: test2, withIntermediateDirectories: true)
+        defer { _ = try? FileManager.default.removeItem(at: test2) }
+
+        let src = test1.appending(path: UUID().uuidString)
+        let dst = test2.appending(path: UUID().uuidString)
+
+        let fileContents = "some file contents".data(using: .utf8)!
+        let attribute = ExtendedAttribute(
+            key: "com.charlessoft.CSFileManager.test-attribute",
+            data: "arbitrary attribute".data(using: .utf8)!
+        )
+
+        let rsrcFork = ExtendedAttribute(
+            key: XATTR_RESOURCEFORK_NAME,
+            data: "you never know, something could use this".data(using: .utf8)!
+        )
+
+        func setupFile(src: URL, dst: URL) throws {
+            _ = try? CSFileManager.shared.removeItem(at: src)
+            _ = try? CSFileManager.shared.removeItem(at: dst)
+
+            try fileContents.write(to: src)
+            try attribute.write(to: src)
+
+            if testRsrcFork {
+                try rsrcFork.write(to: src)
+            }
+        }
+
+        func setupFolder(src: URL, dst: URL) throws {
+            _ = try? CSFileManager.shared.removeItem(at: src)
+            _ = try? CSFileManager.shared.removeItem(at: dst)
+
+            try CSFileManager.shared.createDirectory(at: src, recursively: true)
+            try attribute.write(to: src)
+
+            try setupFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
+        }
+
+        func verifyFile(src: URL, dst: URL) {
+            XCTAssertFalse(try CSFileManager.shared.itemIsReachable(at: src))
+            XCTAssertEqual(try Data(contentsOf: dst), fileContents)
+
+            if testRsrcFork {
+                XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute, rsrcFork])
+            } else {
+                XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute])
+            }
+        }
+
+        func verifyFolder(src: URL, dst: URL) {
+            XCTAssertEqual(try CSFileManager.shared.typeOfItem(at: dst), .directory)
+            XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute])
+            verifyFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
+        }
+
+        XCTAssertThrowsError(try CSFileManager.shared.moveItem(at: FilePath(src.path), to: FilePath(dst.path))) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.moveItem(at: src, to: dst)) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(at: FilePath(src.path), to: FilePath(dst.path))
+        verifyFile(src: src, dst: dst)
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)
+        verifyFile(src: src, dst: dst)
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(at: src, to: dst)
+        verifyFile(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(at: FilePath(src.path), to: FilePath(dst.path))
+        verifyFolder(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)
+        verifyFolder(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.moveItem(at: src, to: dst)
+        verifyFolder(src: src, dst: dst)
     }
 
     func testRemoveRegularFile() throws {
@@ -652,32 +806,21 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertFalse((try? URL(filePath: child.string).checkResourceIsReachable()) ?? false)
     }
 
-    func testReplaceItemsOnSameVolume() throws {
-        let tempURL = FileManager.default.temporaryDirectory
-
-        for eachFS in ["APFS", "HFS+", "ExFAT"] {
-            let dmgURL = try self.createDiskImage(
-                fs: eachFS,
-                at: tempURL.appending(path: UUID().uuidString),
-                megabytes: 10
-            )
-
-            defer { _ = try? FileManager.default.removeItem(at: dmgURL) }
-
-            let (mountPoint: mountPoint, devEntry: devEntry) = try self.mountDiskImage(at: dmgURL)
-            defer { _ = try? self.unmountDiskImage(at: devEntry) }
-
-            try self.testReplaceItemsOnVolume(at: mountPoint)
+    func testReplaceItems() throws {
+        for image1 in Self.diskImages.values {
+            for image2 in Self.diskImages.values {
+                try self.testReplaceItems(fromVolume: image1.mountPoint, toVolume: image2.mountPoint)
+            }
         }
     }
 
-    private func createDiskImage(fs: String, at url: URL, megabytes: Int) throws -> URL {
+    private static func createDiskImage(fs: String, at url: URL, megabytes: Int) throws -> URL {
         let process = Process()
         let pipe = Pipe()
         let handle = pipe.fileHandleForReading
 
         process.executableURL = URL(filePath: "/usr/bin/hdiutil")
-        process.arguments = ["create", "-megabytes", String(megabytes), "-fs", fs, url.path, "-plist"]
+        process.arguments = ["create", "-megabytes", String(megabytes), "-fs", fs, "-volname", fs, url.path, "-plist"]
         process.standardOutput = pipe
 
         try process.run()
@@ -692,7 +835,7 @@ final class CSFileManagerTests: XCTestCase {
         return URL(filePath: path)
     }
     
-    private func mountDiskImage(at url: URL) throws -> (mountPoint: URL, devEntry: URL) {
+    private static func mountDiskImage(at url: URL) throws -> (mountPoint: URL, devEntry: URL) {
         let process = Process()
         let pipe = Pipe()
         let handle = pipe.fileHandleForReading
@@ -716,7 +859,7 @@ final class CSFileManagerTests: XCTestCase {
         return (mountPoint: URL(filePath: mountPoint), devEntry: URL(filePath: devEntry))
     }
 
-    private func unmountDiskImage(at url: URL) throws {
+    private static func unmountDiskImage(at url: URL) throws {
         let process = Process()
 
         process.executableURL = URL(filePath: "/usr/bin/hdiutil")
@@ -726,13 +869,17 @@ final class CSFileManagerTests: XCTestCase {
         process.waitUntilExit()
     }
 
-    private func testReplaceItemsOnVolume(at volURL: URL) throws {
-        let testDir = FilePath(volURL.path).appending(UUID().uuidString)
-        try CSFileManager.shared.createDirectory(at: testDir, mode: 0o755, recursively: false)
-        defer { _ = try? CSFileManager.shared.removeItem(at: testDir, recursively: true) }
+    private func testReplaceItems(fromVolume vol1: URL, toVolume vol2: URL) throws {
+        let testDir1 = FilePath(vol1.path).appending(UUID().uuidString)
+        try CSFileManager.shared.createDirectory(at: testDir1, mode: 0o755, recursively: false)
+        defer { _ = try? CSFileManager.shared.removeItem(at: testDir1, recursively: true) }
 
-        let file1 = testDir.appending(UUID().uuidString)
-        let file2 = testDir.appending(UUID().uuidString)
+        let testDir2 = FilePath(vol2.path).appending(UUID().uuidString)
+        try CSFileManager.shared.createDirectory(at: testDir2, mode: 0o755, recursively: false)
+        defer { _ = try? CSFileManager.shared.removeItem(at: testDir2, recursively: true) }
+
+        let file1 = testDir1.appending(UUID().uuidString)
+        let file2 = testDir2.appending(UUID().uuidString)
 
         let file1Data = "testing 1 2 3".data(using: .utf8)!
         let file2Data = "testing 2 3 4".data(using: .utf8)!

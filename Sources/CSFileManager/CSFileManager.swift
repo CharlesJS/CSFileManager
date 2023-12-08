@@ -309,6 +309,54 @@ public struct CSFileManager {
     }
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func moveItem(at src: FilePath, to dst: FilePath) throws {
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try src.withCString { cSrc in
+                try dst.withCString { cDst in
+                    try self.moveItem(atPath: cSrc, toPath: cDst, errPath: String(describing: dst))
+                }
+            }
+
+            return
+        }
+
+        try src.withPlatformString { cSrc in
+            try dst.withPlatformString { cDst in
+                try self.moveItem(atPath: cSrc, toPath: cDst, errPath: dst.string)
+            }
+        }
+    }
+
+    public func moveItem(atPath src: String, toPath dst: String) throws {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
+            try src.withCString { cSrc in
+                try dst.withCString { cDst in
+                    try self.moveItem(atPath: cSrc, toPath: cDst, errPath: dst)
+                }
+            }
+
+            return
+        }
+
+        try self.moveItem(at: FilePath(src), to: FilePath(dst))
+    }
+
+    private func moveItem(atPath src: UnsafePointer<Int8>, toPath dst: UnsafePointer<Int8>, errPath: String) throws {
+        if rename(src, dst) != 0 {
+            if errno == EXDEV {
+                try callPOSIXFunction(expect: .zero, path: errPath) {
+                    let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_RECURSIVE)
+                    return copyfile(src, dst, nil, flags)
+                }
+
+                try self.removeItem(cPath: src, recursively: true)
+            } else {
+                throw errno(path: errPath)
+            }
+        }
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func removeItem(at path: FilePath, recursively: Bool = false) throws {
         let isDirectory = try self.typeOfItem(at: path) == .directory
 
@@ -319,11 +367,15 @@ public struct CSFileManager {
         }
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
-            try self.removeItem(path: String(decoding: path), isDirectory: isDirectory)
+            try path.withCString { cPath in
+                try self.removeItem(path: String(decoding: path), cPath: cPath, isDirectory: isDirectory)
+            }
             return
         }
 
-        try self.removeItem(path: path.string, isDirectory: isDirectory)
+        try path.withPlatformString { cPath in
+            try self.removeItem(path: path.string, cPath: cPath, isDirectory: isDirectory)
+        }
     }
 
     public func removeItem(atPath path: String, recursively: Bool = false) throws {
@@ -336,7 +388,9 @@ public struct CSFileManager {
                 }
             }
 
-            try self.removeItem(path: path, isDirectory: isDirectory)
+            try path.withCString { cPath in
+                try self.removeItem(path: path, cPath: cPath, isDirectory: isDirectory)
+            }
 
             return
         }
@@ -344,7 +398,21 @@ public struct CSFileManager {
         try self.removeItem(at: FilePath(path), recursively: recursively)
     }
 
-    private func removeItem(path: String, isDirectory: Bool) throws {
+    private func removeItem(cPath: UnsafePointer<Int8>, recursively: Bool) throws {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
+            try self.removeItem(atPath: String(cString: cPath), recursively: recursively)
+            return
+        }
+
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try self.removeItem(at: FilePath(String(cString: cPath)), recursively: recursively)
+            return
+        }
+
+        try self.removeItem(at: FilePath(platformString: cPath), recursively: recursively)
+    }
+
+    private func removeItem(path: String, cPath: UnsafePointer<Int8>, isDirectory: Bool) throws {
         try callPOSIXFunction(expect: .zero, path: path) { isDirectory ? rmdir(path) : unlink(path) }
     }
 
@@ -354,8 +422,8 @@ public struct CSFileManager {
         withItemAt newPath: FilePath,
         options: ItemReplacementOptions = []
     ) throws {
-        let originalInfo = try FileInfo(path: originalPath, keys: [.volumeUUID, .volumeCapabilities])
-        let newInfo = try FileInfo(path: originalPath, keys: [.volumeUUID, .volumeCapabilities])
+        let originalInfo = try FileInfo(at: originalPath, keys: [.volumeUUID, .volumeCapabilities, .volumeMountPoint])
+        let newInfo = try FileInfo(at: newPath, keys: [.volumeUUID, .volumeCapabilities, .volumeMountPoint])
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             try originalPath.withCString { orig in
@@ -393,8 +461,8 @@ public struct CSFileManager {
         withItemAtPath newPath: String,
         options: ItemReplacementOptions = []
     ) throws {
-        let originalInfo = try FileInfo(path: originalPath, keys: [.volumeUUID, .volumeCapabilities])
-        let newInfo = try FileInfo(path: originalPath, keys: [.volumeUUID, .volumeCapabilities])
+        let originalInfo = try FileInfo(atPath: originalPath, keys: [.volumeUUID, .volumeCapabilities])
+        let newInfo = try FileInfo(atPath: newPath, keys: [.volumeUUID, .volumeCapabilities])
 
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             try originalPath.withCString { orig in
@@ -417,28 +485,6 @@ public struct CSFileManager {
    }
 
     private func replaceItem(
-        path: String,
-        originalCPath: UnsafePointer<CChar>,
-        originalInfo: FileInfo,
-        newCPath: UnsafePointer<CChar>,
-        newInfo: FileInfo,
-        options: ItemReplacementOptions
-    ) throws {
-        try self._replaceItem(
-            path: path,
-            originalCPath: originalCPath,
-            originalInfo: originalInfo,
-            newCPath: newCPath,
-            newInfo: newInfo,
-            options: options
-        )
-
-        if !options.contains(.withoutDeletingBackupItem) {
-            try callPOSIXFunction(expect: .zero) { unlink(newCPath) }
-        }
-    }
-
-    private func _replaceItem(
         path: String,
         originalCPath: UnsafePointer<CChar>,
         originalInfo: FileInfo,
@@ -476,6 +522,10 @@ public struct CSFileManager {
 
         _ = try callPOSIXFunction(expect: .zero, path: path) {
             renamex_np(newCPath, originalCPath, UInt32(bitPattern: RENAME_SWAP))
+        }
+
+        if !options.contains(.withoutDeletingBackupItem) {
+            try self.removeItem(cPath: newCPath, recursively: true)
         }
     }
 
@@ -525,6 +575,10 @@ public struct CSFileManager {
             let preserveFrom = options.contains(.withoutDeletingBackupItem)
             try self.copyMetadata(path: path, from: newCPath, to: originalCPath, swap: true, preserveFrom: preserveFrom)
         }
+
+        if !options.contains(.withoutDeletingBackupItem) {
+            try self.removeItem(cPath: newCPath, recursively: true)
+        }
     }
 
     private func manualReplaceItem(
@@ -555,9 +609,14 @@ public struct CSFileManager {
         strncpy(tempPath + len + 6, uuidString, uuidLen)
         tempPath[len + 6 + uuidLen] = 0
 
-        try callPOSIXFunction(expect: .zero, path: String(cString: tempPath)) { rename(originalCPath, tempPath) }
-        try callPOSIXFunction(expect: .zero, path: path) { rename(newCPath, originalCPath) }
-        try callPOSIXFunction(expect: .zero, path: path) { rename(tempPath, newCPath) }
+        try self.moveItem(atPath: originalCPath, toPath: tempPath, errPath: String(cString: tempPath))
+        try self.moveItem(atPath: newCPath, toPath: originalCPath, errPath: String(cString: originalCPath))
+
+        if options.contains(.withoutDeletingBackupItem) {
+            try self.moveItem(atPath: tempPath, toPath: newCPath, errPath: String(cString: newCPath))
+        } else {
+            try self.removeItem(cPath: tempPath, recursively: true)
+        }
     }
 
     private func copyMetadata(

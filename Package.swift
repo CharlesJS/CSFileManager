@@ -23,7 +23,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/CharlesJS/CSErrors", from: "1.2.2"),
-        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.3.1")
+        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.4.0")
     ],
     targets: [
         .target(
@@ -36,7 +36,12 @@ let package = Package(
         ),
         .testTarget(
             name: "CSFileManagerTests",
-            dependencies: ["CSFileManager", "CSFileManager_Foundation"]
+            dependencies: [
+                "CSFileManager",
+                "CSFileManager_Foundation",
+                "CSFileInfo",
+                .product(name: "CSFileInfo+Foundation", package: "CSFileInfo")
+            ]
         ),
     ]
 )

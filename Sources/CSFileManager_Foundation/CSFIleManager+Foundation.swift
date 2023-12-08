@@ -79,6 +79,15 @@ extension CSFileManager {
         try self.createDirectory(at: FilePath(url.path), mode: mode, recursively: recursively)
     }
 
+    public func moveItem(at src: URL, to dst: URL) throws {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
+            try self.moveItem(atPath: src.path, toPath: dst.path)
+            return
+        }
+
+        try self.moveItem(at: FilePath(src.path), to: FilePath(dst.path))
+    }
+
     public func removeItem(at url: URL, recursively: Bool = false) throws {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
             try self.removeItem(atPath: url.path, recursively: recursively)
