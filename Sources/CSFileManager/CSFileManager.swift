@@ -56,6 +56,19 @@ public struct CSFileManager {
     public static let shared = CSFileManager()
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public var rootDirectory: FilePath { "/" }
+    public var rootDirectoryStringPath: String { "/" }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public var homeDirectoryForCurrentUser: FilePath {
+        try! User.current.homeDirectory!
+    }
+
+    public var homeDirectoryStringPathForCurrentUser: String {
+        try! User.current.homeDirectoryStringPath!
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public var temporaryDirectory: FilePath {
         FilePath(self.temporaryDirectoryStringPath)
     }
@@ -70,14 +83,30 @@ public struct CSFileManager {
         } ?? "/tmp"
     }
 
+    private func generateUUID() -> String {
+        let ptr = UnsafeMutablePointer<CChar>.allocate(capacity: 37)
+        defer { ptr.deallocate() }
+
+        var uuid = uuid_t(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        uuid_generate(&uuid)
+        uuid_unparse(&uuid, ptr)
+
+        return String(cString: ptr)
+    }
+
     private static let defaultTemplate = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
-    public func createTemporaryFile(template t: String? = nil, suffix: String? = nil) throws -> (FileDescriptor, FilePath) {
+    public func createTemporaryFile(
+        directory: FilePath? = nil,
+        template t: String? = nil,
+        suffix: String? = nil
+    ) throws -> (FileDescriptor, FilePath) {
+        let tempDir = directory ?? self.temporaryDirectory
         let template = t ?? Self.defaultTemplate
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
-            let templatePath = String(decoding: self.temporaryDirectory) + "/" + template
+            let templatePath = String(decoding: tempDir) + "/" + template
 
             return try templatePath.withCString {
                 try self.createTemporaryFile(templatePath: $0, suffix: suffix) { fd, path in
@@ -86,7 +115,7 @@ public struct CSFileManager {
             }
         }
 
-        let templatePath = self.temporaryDirectory.appending(template)
+        let templatePath = tempDir.appending(template)
 
         return try templatePath.withPlatformString {
             try self.createTemporaryFile(templatePath: $0, suffix: suffix) { fd, path in
@@ -95,9 +124,13 @@ public struct CSFileManager {
         }
     }
 
-    public func createTemporaryFileWithStringPath(template: String? = nil, suffix: String? = nil) throws -> (Int32, String) {
+    public func createTemporaryFileWithStringPath(
+        directory: String? = nil,
+        template: String? = nil,
+        suffix: String? = nil
+    ) throws -> (Int32, String) {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
-            var tempDir = self.temporaryDirectoryStringPath
+            var tempDir = directory ?? self.temporaryDirectoryStringPath
 
             if tempDir.last != "/" {
                 tempDir.append("/")
@@ -112,13 +145,78 @@ public struct CSFileManager {
             }
         }
 
-        let (desc, path) = try self.createTemporaryFile(template: template, suffix: suffix)
+        let (desc, path) = try self.createTemporaryFile(
+            directory: directory.map { FilePath($0) },
+            template: template,
+            suffix: suffix
+        )
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             return (desc.rawValue, String(decoding: path))
         }
 
         return (desc.rawValue, path.string)
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func createItemReplacementDirectory(for destination: FilePath? = nil, mode: mode_t = 0o755) throws -> FilePath {
+        let directory = self.getItemReplacementDirectory(for: destination)
+
+        try self.createDirectory(at: directory, mode: mode, recursively: true)
+
+        return directory
+    }
+
+    public func createItemReplacementDirectoryWithStringPath(
+        forPath destination: String? = nil,
+        mode: mode_t = 0o755
+    ) throws -> String {
+        let directory = self.getItemReplacementDirectory(for: destination)
+
+        try self.createDirectory(atPath: directory, mode: mode, recursively: true)
+
+        return directory
+    }
+
+    private func generateItemReplacementDirectoryName() -> String {
+        "CSFileManager_ItemReplacement_\(self.generateUUID())"
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    private func getItemReplacementDirectory(for destination: FilePath?) -> FilePath {
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            return FilePath(self.getItemReplacementDirectory(for: destination.map { String(describing: $0) }))
+        }
+
+        let tempPath = self.temporaryDirectory
+
+        if let destination,
+           var destVolume = (try? FileInfo(at: destination, keys: .volumeUUID))?.volumeUUID,
+           var tempVolume = (try? FileInfo(at: tempPath, keys: .volumeUUID))?.volumeUUID,
+           uuid_compare(&destVolume, &tempVolume) != 0 {
+            return destination.removingLastComponent().appending(self.generateItemReplacementDirectoryName())
+        }
+
+        return tempPath.appending(self.generateItemReplacementDirectoryName())
+    }
+
+    private func getItemReplacementDirectory(for destination: String?) -> String {
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            let tempPath = self.temporaryDirectoryStringPath
+
+            if let destination,
+               var destVolume = (try? FileInfo(atPath: destination, keys: .volumeUUID))?.volumeUUID,
+               var tempVolume = (try? FileInfo(atPath: tempPath, keys: .volumeUUID))?.volumeUUID,
+               uuid_compare(&destVolume, &tempVolume) != 0 {
+                let parent = destination.lastIndex(of: "/").map { destination[..<$0] } ?? tempPath[...]
+
+                return "\(parent)/\(self.generateItemReplacementDirectoryName())"
+            }
+
+            return "\(tempPath)/\(self.generateItemReplacementDirectoryName())"
+        }
+
+        return self.getItemReplacementDirectory(for: destination.map { FilePath($0) }).string
     }
 
     private func createTemporaryFile<T>(

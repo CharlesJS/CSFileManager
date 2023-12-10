@@ -11,14 +11,18 @@ final class CSFileManagerTests: XCTestCase {
     func testAll() throws {
         for version in [10, 11, 12, 13] {
             try emulateOSVersion(version) {
+                self.testRootDirectory()
+                self.testHomeDirectory()
                 self.testTemporaryDirectory()
                 self.testTemporaryDirectoryFallback()
                 try self.testCreateTemporaryFile()
+                try self.testCreateTemporaryFileWithDirectory()
                 try self.testCreateTemporaryFileWithTemplate()
                 try self.testCreateTemporaryFileWithTemplateAndSuffix()
                 try self.testCreateTemporaryFileWithTemplateAndFallback()
                 try self.testCreateTemporaryFileWithTemplateAndNoSlashOnTMPDIR()
                 try self.testCreateTemporaryFileFailure()
+                try self.testCreateItemReplacementDirectory()
                 self.testReachablePaths()
                 self.testUnreachablePaths()
                 try self.testReachabilityCheckError()
@@ -79,6 +83,21 @@ final class CSFileManagerTests: XCTestCase {
         }
     }
 
+    func testRootDirectory() {
+        XCTAssertEqual(CSFileManager.shared.rootDirectory, "/")
+        XCTAssertEqual(CSFileManager.shared.rootDirectoryStringPath, "/")
+        XCTAssertEqual(CSFileManager.shared.rootDirectoryURL, URL(filePath: "/"))
+    }
+
+    func testHomeDirectory() {
+        XCTAssertEqual(CSFileManager.shared.homeDirectoryForCurrentUser, FilePath(NSHomeDirectory()))
+        XCTAssertEqual(CSFileManager.shared.homeDirectoryStringPathForCurrentUser, NSHomeDirectory())
+        XCTAssertEqual(
+            CSFileManager.shared.homeDirectoryURLForCurrentUser,
+            URL(filePath: NSHomeDirectory(), directoryHint: .isDirectory)
+        )
+    }
+
     func testTemporaryDirectory() {
         XCTAssertEqual(CSFileManager.shared.temporaryDirectory, FilePath(FileManager.default.temporaryDirectory.path))
         XCTAssertEqual(CSFileManager.shared.temporaryDirectoryStringPath, FileManager.default.temporaryDirectory.path + "/")
@@ -130,7 +149,38 @@ final class CSFileManagerTests: XCTestCase {
         try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
         XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
     }
-    
+
+    func testCreateTemporaryFileWithDirectory() throws {
+        let directory = FilePath("/tmp/\(UUID().uuidString)")
+        try CSFileManager.shared.createDirectory(at: directory)
+        defer { _ = try? CSFileManager.shared.removeItem(at: directory) }
+
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(directory: directory)
+        defer { _ = try? desc.close() }
+
+        XCTAssertTrue(path.starts(with: directory))
+        XCTAssertEqual(path.lastComponent?.string.count, 32)
+        try desc.writeAll("Foo Bar".data(using: .ascii)!)
+
+        XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii)!, "Foo Bar")
+
+        let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(directory: directory.string)
+        defer { close(fdInt) }
+
+        XCTAssertTrue(pathString.starts(with: directory.string))
+        XCTAssertEqual(URL(filePath: pathString).lastPathComponent.count, 32)
+        XCTAssertEqual(write(fdInt, "Foo Bar Baz", 11), 11)
+        XCTAssertEqual(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii)!, "Foo Bar Baz")
+            
+        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(directory: URL(filePath: directory))
+        defer { _ = try? handle.close() }
+
+        XCTAssertTrue(url.path.starts(with: directory.string))
+        XCTAssertEqual(url.lastPathComponent.count, 32)
+        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
+        XCTAssertEqual(try String(data: Data(contentsOf: url), encoding: .ascii)!, "Foo Bar Baz")
+    }
+
     func testCreateTemporaryFileWithTemplate() throws {
         let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX")
         defer {
@@ -343,6 +393,83 @@ final class CSFileManagerTests: XCTestCase {
 
         XCTAssertThrowsError(try CSFileManager.shared.createTemporaryFileWithStringPath(template: "nonexist/dir/XXXX")) {
             XCTAssertTrue($0.isFileNotFoundError)
+        }
+    }
+
+    func testCreateItemReplacementDirectory() throws {
+        func testFilePath(target: FilePath?, mode: mode_t, closure: (FilePath) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
+            defer { _ = try? CSFileManager.shared.removeItem(at: path) }
+
+            try closure(path)
+        }
+
+        func testString(target: String?, mode: mode_t, closure: (String) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectoryWithStringPath(forPath: target, mode: mode)
+            defer { _ = try? CSFileManager.shared.removeItem(atPath: path) }
+
+            try closure(path)
+        }
+
+        func testURL(target: URL?, mode: mode_t, closure: (URL) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectoryWithURL(for: target, mode: mode)
+            defer { _ = try? CSFileManager.shared.removeItem(at: path) }
+
+            try closure(path)
+        }
+
+        let imageMount = FilePath(Self.diskImages.values.first!.mountPoint.path)
+        let imageParentDir = imageMount.appending(UUID().uuidString)
+        let imageTargetFile = imageParentDir.appending(UUID().uuidString)
+
+        try CSFileManager.shared.createDirectory(at: imageParentDir, recursively: true)
+        defer { _ = try? CSFileManager.shared.removeItem(at: imageParentDir) }
+
+        try Data().write(to: URL(filePath: imageTargetFile.string))
+
+        try testFilePath(target: nil, mode: 0o755) { path in
+            XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectory))
+            XCTAssertEqual(try FileInfo(at: path, keys: .permissionsMode).permissionsMode, 0o755)
+        }
+        
+        try testFilePath(target: FilePath(NSHomeDirectory()), mode: 0o600) { path in
+            XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectory))
+            XCTAssertEqual(try FileInfo(at: path, keys: .permissionsMode).permissionsMode, 0o600)
+        }
+
+        try testFilePath(target: imageTargetFile, mode: 0o700) { path in
+            XCTAssertTrue(path.starts(with: imageParentDir))
+            XCTAssertEqual(try FileInfo(at: path, keys: .permissionsMode).permissionsMode, 0o700)
+        }
+
+        try testString(target: nil, mode: 0o755) { path in
+            XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            XCTAssertEqual(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode, 0o755)
+        }
+        
+        try testString(target: NSHomeDirectory(), mode: 0o600) { path in
+            XCTAssertTrue(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            XCTAssertEqual(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode, 0o600)
+        }
+
+        try testString(target: imageTargetFile.string, mode: 0o700) { path in
+            XCTAssertTrue(path.starts(with: imageParentDir.string))
+            XCTAssertEqual(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode, 0o700)
+        }
+
+        try testURL(target: nil, mode: 0o755) { url in
+            XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            XCTAssertEqual(try FileInfo(at: url, keys: .permissionsMode).permissionsMode, 0o755)
+        }
+
+        try testURL(target: FileManager.default.homeDirectoryForCurrentUser, mode: 0o600) { url in
+            XCTAssertTrue(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            XCTAssertEqual(try FileInfo(at: url, keys: .permissionsMode).permissionsMode, 0o600)
+        }
+
+        try testURL(target: URL(filePath: imageTargetFile.string), mode: 0o700) { url in
+            XCTAssertTrue(url.path.starts(with: imageParentDir.string))
+            XCTAssertEqual(try FileInfo(at: url, keys: .permissionsMode).permissionsMode, 0o700)
         }
     }
 

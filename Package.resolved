@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/CSFileInfo",
       "state" : {
-        "revision" : "f0da764b93a77938d33cc2c1df933555790fd1d9",
-        "version" : "0.4.0"
+        "revision" : "3db16415896212e4bc4edafdc820fe207f428406",
+        "version" : "0.4.1"
       }
     },
     {

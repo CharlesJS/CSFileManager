@@ -10,6 +10,30 @@ import Foundation
 import System
 
 extension CSFileManager {
+    public var rootDirectoryURL: URL {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
+            return URL(fileURLWithPath: self.rootDirectoryStringPath, isDirectory: true)
+        }
+
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
+            return URL(fileURLWithPath: String(describing: self.rootDirectory), isDirectory: true)
+        }
+
+        return URL(fileURLWithPath: self.rootDirectory.string, isDirectory: true)
+    }
+
+    public var homeDirectoryURLForCurrentUser: URL {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
+            return URL(fileURLWithPath: self.homeDirectoryStringPathForCurrentUser, isDirectory: true)
+        }
+
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
+            return URL(fileURLWithPath: String(describing: self.homeDirectoryForCurrentUser), isDirectory: true)
+        }
+
+        return URL(fileURLWithPath: self.homeDirectoryForCurrentUser.string, isDirectory: true)
+    }
+
     public var temporaryDirectoryURL: URL {
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
             guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
@@ -22,20 +46,48 @@ extension CSFileManager {
         return URL(fileURLWithPath: self.temporaryDirectory.string, isDirectory: true)
     }
 
-    public func createTemporaryFileURL(template: String? = nil, suffix: String? = nil) throws -> (FileHandle, URL) {
+    public func createTemporaryFileURL(
+        directory: URL? = nil,
+        template: String? = nil,
+        suffix: String? = nil
+    ) throws -> (FileHandle, URL) {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
-            let (fd, path) = try self.createTemporaryFileWithStringPath(template: template, suffix: suffix)
+            let (fd, path) = try self.createTemporaryFileWithStringPath(
+                directory: directory?.path,
+                template: template,
+                suffix: suffix
+            )
 
             return (FileHandle(fileDescriptor: fd), URL(fileURLWithPath: path))
         }
 
-        let (fd, path) = try self.createTemporaryFile(template: template, suffix: suffix)
-        
+        let (fd, path) = try self.createTemporaryFile(
+            directory: directory.map { FilePath($0.path) },
+            template: template, 
+            suffix: suffix
+        )
+
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
             return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: String(describing: path)))
         }
         
         return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: path.string))
+    }
+
+    public func createItemReplacementDirectoryWithURL(for url: URL?, mode: mode_t = 0o755) throws -> URL {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
+            return try URL(
+                fileURLWithPath: self.createItemReplacementDirectoryWithStringPath(forPath: url?.path, mode: mode)
+            )
+        }
+
+        let path = try self.createItemReplacementDirectory(for: url.map { FilePath($0.path) }, mode: mode)
+
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
+            return URL(fileURLWithPath: String(describing: path))
+        }
+
+        return URL(fileURLWithPath: path.string)
     }
 
     public func itemIsReachable(at url: URL) throws -> Bool {

@@ -23,7 +23,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/CharlesJS/CSErrors", from: "1.2.2"),
-        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.4.0")
+        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.4.1")
     ],
     targets: [
         .target(
