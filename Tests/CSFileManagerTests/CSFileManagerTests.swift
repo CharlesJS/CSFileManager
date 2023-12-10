@@ -31,6 +31,7 @@ final class CSFileManagerTests: XCTestCase {
                 try self.testCreateDirectory()
                 try self.testCreateDirectoryWithStringPaths()
                 try self.testCreateDirectoryWithURLs()
+                try self.testCopyItems()
                 try self.testMoveItems()
                 try self.testRemoveRegularFile()
                 try self.testRemoveEmptyDirectory()
@@ -707,6 +708,104 @@ final class CSFileManagerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: deepDir.path)[.posixPermissions] as? mode_t, 0o700)
     }
 
+    func testCopyItems() throws {
+        let testDir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
+        defer { _ = try? FileManager.default.removeItem(at: testDir) }
+
+        let src = testDir.appending(path: UUID().uuidString)
+        let dst = testDir.appending(path: UUID().uuidString)
+
+        let fileContents = "some file contents".data(using: .utf8)!
+        let attribute = ExtendedAttribute(
+            key: "com.charlessoft.CSFileManager.test-attribute",
+            data: "arbitrary attribute".data(using: .utf8)!
+        )
+
+        let rsrcFork = ExtendedAttribute(
+            key: XATTR_RESOURCEFORK_NAME,
+            data: "you never know, something could use this".data(using: .utf8)!
+        )
+
+        func setupFile(src: URL, dst: URL) throws {
+            let srcDotfile = src.deletingLastPathComponent().appending(path: "._\(src.lastPathComponent)")
+            let dstDotfile = dst.deletingLastPathComponent().appending(path: "._\(dst.lastPathComponent)")
+
+            _ = try? CSFileManager.shared.removeItem(at: src, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: dst, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: srcDotfile, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: dstDotfile, recursively: true)
+
+            try fileContents.write(to: src)
+            try attribute.write(to: src)
+            try rsrcFork.write(to: src)
+        }
+
+        func setupFolder(src: URL, dst: URL) throws {
+            let srcDotfile = src.deletingLastPathComponent().appending(path: "._\(src.lastPathComponent)")
+            let dstDotfile = dst.deletingLastPathComponent().appending(path: "._\(dst.lastPathComponent)")
+
+            _ = try? CSFileManager.shared.removeItem(at: src, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: dst, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: srcDotfile, recursively: true)
+            _ = try? CSFileManager.shared.removeItem(at: dstDotfile, recursively: true)
+
+            try CSFileManager.shared.createDirectory(at: src, recursively: true)
+            try attribute.write(to: src)
+
+            try setupFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
+        }
+
+        func verifyFile(src: URL, dst: URL) {
+            XCTAssertTrue(try CSFileManager.shared.itemIsReachable(at: src))
+            XCTAssertEqual(try Data(contentsOf: dst), fileContents)
+            XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute, rsrcFork])
+        }
+
+        func verifyFolder(src: URL, dst: URL) {
+            XCTAssertEqual(try CSFileManager.shared.typeOfItem(at: src), .directory)
+            XCTAssertEqual(try CSFileManager.shared.typeOfItem(at: dst), .directory)
+            XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute])
+            verifyFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
+        }
+
+        XCTAssertThrowsError(try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+        
+        XCTAssertThrowsError(try CSFileManager.shared.copyItem(at: src, to: dst)) {
+            XCTAssertTrue($0.isFileNotFoundError)
+        }
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))
+        verifyFile(src: src, dst: dst)
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)
+        verifyFile(src: src, dst: dst)
+
+        try setupFile(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(at: src, to: dst)
+        verifyFile(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))
+        verifyFolder(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)
+        verifyFolder(src: src, dst: dst)
+
+        try setupFolder(src: src, dst: dst)
+        try CSFileManager.shared.copyItem(at: src, to: dst)
+        verifyFolder(src: src, dst: dst)
+    }
+
     func testMoveItems() throws {
         for image1 in Self.diskImages.values {
             for image2 in Self.diskImages.values {
@@ -773,6 +872,7 @@ final class CSFileManagerTests: XCTestCase {
         }
 
         func verifyFolder(src: URL, dst: URL) {
+            XCTAssertFalse(try CSFileManager.shared.itemIsReachable(at: src))
             XCTAssertEqual(try CSFileManager.shared.typeOfItem(at: dst), .directory)
             XCTAssertEqual(try Set(ExtendedAttribute.list(at: dst)), [attribute])
             verifyFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))

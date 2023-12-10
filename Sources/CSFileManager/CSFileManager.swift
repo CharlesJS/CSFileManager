@@ -407,6 +407,46 @@ public struct CSFileManager {
     }
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func copyItem(at src: FilePath, to dst: FilePath) throws {
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try src.withCString { cSrc in
+                try dst.withCString { cDst in
+                    try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: String(describing: dst))
+                }
+            }
+
+            return
+        }
+
+        try src.withPlatformString { cSrc in
+            try dst.withPlatformString { cDst in
+                try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: dst.string)
+            }
+        }
+    }
+
+    public func copyItem(atPath src: String, toPath dst: String) throws {
+        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
+            try src.withCString { cSrc in
+                try dst.withCString { cDst in
+                    try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: String(describing: dst))
+                }
+            }
+
+            return
+        }
+
+        return try self.copyItem(at: FilePath(src), to: FilePath(dst))
+    }
+
+    private func copyItem(atCPath src: UnsafePointer<Int8>, toCPath dst: UnsafePointer<Int8>, errPath: String) throws {
+        try callPOSIXFunction(expect: .zero, path: errPath) {
+            let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_RECURSIVE)
+            return copyfile(src, dst, nil, flags)
+        }
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func moveItem(at src: FilePath, to dst: FilePath) throws {
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             try src.withCString { cSrc in
@@ -442,11 +482,7 @@ public struct CSFileManager {
     private func moveItem(atPath src: UnsafePointer<Int8>, toPath dst: UnsafePointer<Int8>, errPath: String) throws {
         if rename(src, dst) != 0 {
             if errno == EXDEV {
-                try callPOSIXFunction(expect: .zero, path: errPath) {
-                    let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_RECURSIVE)
-                    return copyfile(src, dst, nil, flags)
-                }
-
+                try self.copyItem(atCPath: src, toCPath: dst, errPath: errPath)
                 try self.removeItem(cPath: src, recursively: true)
             } else {
                 throw errno(path: errPath)
