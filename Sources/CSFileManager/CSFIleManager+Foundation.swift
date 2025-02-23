@@ -5,8 +5,14 @@
 //  Created by Charles Srstka on 11/20/23.
 //
 
-import CSFileManager
+#if Foundation
+
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
+
 import System
 
 extension CSFileManager {
@@ -167,3 +173,5 @@ extension CSFileManager {
         try self.replaceItem(at: FilePath(originalURL.path), withItemAt: FilePath(newURL.path), options: options)
     }
 }
+
+#endif

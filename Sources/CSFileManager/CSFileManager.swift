@@ -8,7 +8,7 @@ import Darwin
 import Glibc
 #endif
 
-public struct CSFileManager {
+public struct CSFileManager: Sendable {
     public enum FileType {
         case regular
         case directory
@@ -45,7 +45,7 @@ public struct CSFileManager {
         }
     }
 
-    public struct ItemReplacementOptions: OptionSet {
+    public struct ItemReplacementOptions: OptionSet, Sendable {
         public var rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 

@@ -6,16 +6,18 @@
 //
 
 #if DEBUG
-private var emulatedVersion: Int = .max
+import SyncPolyfill
+
+private let emulatedVersionMutex = Mutex<Int>(.max)
 
 func emulateOSVersion(_ version: Int, closure: () throws -> Void) rethrows {
-    emulatedVersion = version
-    defer { emulatedVersion = .max }
+    emulatedVersionMutex.withLock { $0 = version }
+    defer { emulatedVersionMutex.withLock { $0 = .max } }
 
     try closure()
 }
 
-package func versionCheck(_ version: Int) -> Bool { emulatedVersion >= version }
+internal func versionCheck(_ version: Int) -> Bool { emulatedVersionMutex.withLock { $0 >= version } }
 #else
 @inline(__always) func versionCheck(_: Int) -> Bool { true }
 #endif
