@@ -1,13 +1,13 @@
 {
-  "originHash" : "64cf4d9afb2554e4725ce953968eec39013623e6aff0103d613da393dab44d3c",
+  "originHash" : "4342f095a930bb25ec7eb6227fbcd6ce8371084c3e9e80812686da0766efa948",
   "pins" : [
     {
       "identity" : "cserrors",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/CSErrors",
       "state" : {
-        "revision" : "776b7813f14e4618701b3c4f33c7ff27be53dfc0",
-        "version" : "2.0.0"
+        "revision" : "7426dd06aaeedf468b768f77f48b3f52e87abc5d",
+        "version" : "2.1.0"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/CSFileInfo",
       "state" : {
-        "revision" : "25a6944d7249e4d3659df097c9dd3e2ca24c0256",
-        "version" : "0.5.0"
+        "revision" : "67dba5759e9a6440d61af9922efff09dda36e3a1",
+        "version" : "0.6.4"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/DataParser",
       "state" : {
-        "revision" : "cac5f86aa5662c7cd7a9ec24758924975fcc1f32",
-        "version" : "0.5.0"
+        "revision" : "51328a430057a6ae3710046f1582f8d2a25583ca",
+        "version" : "0.6.0"
       }
     },
     {
@@ -33,8 +33,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/HFSTypeConversion",
       "state" : {
-        "revision" : "98602ed31ab4299a749cb258ee2557518144b16a",
-        "version" : "0.1.3"
+        "revision" : "d37a4a73067ff15c7aea575712196780fefe94b6",
+        "version" : "0.1.4"
+      }
+    },
+    {
+      "identity" : "lzfse-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CharlesJS/lzfse-swift",
+      "state" : {
+        "revision" : "01e33efe2b7b112f1a31a90d7735452623d5bab7",
+        "version" : "1.0.0"
       }
     },
     {
@@ -47,12 +56,30 @@
       }
     },
     {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system",
+      "state" : {
+        "revision" : "50688cacbd41d547e9eb9f7a213542340b7c442b",
+        "version" : "1.7.5"
+      }
+    },
+    {
       "identity" : "syncpolyfill",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/CharlesJS/SyncPolyfill",
       "state" : {
-        "revision" : "aa37b7f0d80031c0081aa3a8de7e0fee5717f806",
-        "version" : "0.1.0"
+        "revision" : "c18c41fa1b635def5dda128c39243542b187116a",
+        "version" : "0.1.2"
+      }
+    },
+    {
+      "identity" : "test-helpers",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CharlesJS/test-helpers.git",
+      "state" : {
+        "revision" : "bfbf6ffe4445972f342610999e1a3183ed42d91e",
+        "version" : "0.3.2"
       }
     }
   ],

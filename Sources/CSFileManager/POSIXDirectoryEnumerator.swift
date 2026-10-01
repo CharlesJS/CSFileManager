@@ -5,12 +5,19 @@
 //
 
 import CSErrors
+
+#if canImport(System)
 import System
+#else
+import SystemPackage
+#endif
 
 #if canImport(Darwin)
 import Darwin
+typealias DirPtr = UnsafeMutablePointer<DIR>
 #else
 import Glibc
+typealias DirPtr = OpaquePointer
 #endif
 
 struct POSIXDirectoryEnumerator: Sequence {
@@ -25,7 +32,7 @@ struct POSIXDirectoryEnumerator: Sequence {
         private class StackItem {
             let absolutePath: String
             let relativePath: String?
-            let dir: UnsafeMutablePointer<DIR>
+            let dir: DirPtr
 
             init(absolutePath: String, relativePath: String?) throws {
                 self.absolutePath = absolutePath
@@ -59,11 +66,17 @@ struct POSIXDirectoryEnumerator: Sequence {
             }
 
             let name: String = withUnsafePointer(to: &entry.pointee.d_name) {
+#if canImport(Darwin)
                 let count = Int(entry.pointee.d_namlen)
 
                 return $0.withMemoryRebound(to: UInt8.self, capacity: count) {
                     String(decoding: UnsafeBufferPointer(start: $0, count: count), as: UTF8.self)
                 }
+#else
+                return $0.withMemoryRebound(to: UInt8.self, capacity: 256) {
+                    String(decodingCString: $0, as: UTF8.self)
+                }
+#endif
             }
 
             if name == "." || name == ".." { return self.next() }
