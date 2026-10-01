@@ -1,0 +1,13 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  run-ci:
+    uses: CharlesJS/shared-workflows/.github/workflows/ci.yml@main
+    with: 
+      setup_filesystems: true

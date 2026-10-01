@@ -13,7 +13,11 @@ import FoundationEssentials
 import Foundation
 #endif
 
+#if canImport(System)
 import System
+#else
+import SystemPackage
+#endif
 
 extension CSFileManager {
     public var rootDirectoryURL: URL {
@@ -80,11 +84,9 @@ extension CSFileManager {
         return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: path.string))
     }
 
-    public func createItemReplacementDirectoryWithURL(for url: URL?, mode: mode_t = 0o755) throws -> URL {
+    public func createItemReplacementDirectory(for url: URL?, mode: mode_t = 0o755) throws -> URL {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
-            return try URL(
-                fileURLWithPath: self.createItemReplacementDirectoryWithStringPath(forPath: url?.path, mode: mode)
-            )
+            return try URL(fileURLWithPath: self.createItemReplacementDirectory(forPath: url?.path, mode: mode))
         }
 
         let path = try self.createItemReplacementDirectory(for: url.map { FilePath($0.path) }, mode: mode)
