@@ -1,6 +1,7 @@
 import CSErrors
 import CSFileInfo
 @testable import CSFileManager
+import DiskImageHelper
 import Foundation
 import SyncPolyfill
 import Testing
@@ -11,8 +12,18 @@ import System
 import SystemPackage
 #endif
 
-@Suite(.serialized, DiskImage.MountTrait())
+let withFixtures = MountTrait(size: 1024 * 1024, fileSystems: DiskImageHelper.FileSystem.allCases.filter(\.isWritable).filter { ![.udf, .fat32].contains($0) })
+
+@Suite(.serialized, withFixtures)
 struct CSFileManagerTests {
+    typealias DiskImage = MountTrait<GenericDiskImageInfo>.DiskImage
+
+#if canImport(Darwin)
+    static let hostSupportsResourceFork = true
+#else
+    static let hostSupportsResourceFork = false
+#endif
+
 #if canImport(Darwin)
     @Test
     func testAll() throws {
@@ -29,29 +40,32 @@ struct CSFileManagerTests {
                 try self.testCreateTemporaryFileWithTemplateAndFallback()
                 try self.testCreateTemporaryFileWithTemplateAndNoSlashOnTMPDIR()
                 try self.testCreateTemporaryFileFailure()
-                try self.testCreateItemReplacementDirectory()
+                try self.testCreateItemReplacementDirectoryOnBootVolume()
+                for eachDiskImage in withFixtures.images {
+                    try self.testCreateItemReplacementDirectoryOnOtherVolume(diskImage: eachDiskImage)
+                }
                 try self.testReachablePaths()
                 try self.testUnreachablePaths()
                 try self.testReachabilityCheckError()
                 try self.testGetTypeOfItem()
                 try self.testContentsOfDirectory()
                 try self.testCreateDirectory()
+#if canImport(Darwin)
                 try self.testCreateDirectoryWithStringPaths()
+#endif
 #if Foundation
                 try self.testCreateDirectoryWithURLs()
 #endif
                 try self.testCopyItems()
-                try self.testMoveItems()
+                try self.testMoveItems(image1: nil, image2: nil)
                 try self.testRemoveRegularFile()
                 try self.testRemoveEmptyDirectory()
                 try self.testRemoveDirectoryWithContents()
-                try self.testReplaceItems()
+                try self.testReplaceItems(image1: nil, image2: nil)
             }
         }
     }
 #endif
-
-    private static var diskImages: [String : DiskImage] { DiskImage.MountTrait.diskImages }
 
     private func expectNoSuchFile(_ url: URL) {
         let error = #expect(throws: CocoaError.self) { try url.checkResourceIsReachable() }
@@ -877,17 +891,17 @@ struct CSFileManagerTests {
 #endif
     }
 
-    @Test
-    func testMoveItems() throws {
-        for image1 in Self.diskImages.values {
-            for image2 in Self.diskImages.values {
-                let rsrcFork = image1.supportResourceFork && image2.supportResourceFork
-                try self.testMoveItems(fromVolume: image1.mountPoint, toVolume: image2.mountPoint, testRsrcFork: rsrcFork)
-            }
-        }
+    @Test(arguments: [nil] + withFixtures.images, [nil] + withFixtures.images)
+    func testMoveItems(image1: DiskImage?, image2: DiskImage?) throws {
+        try self.testMoveItems(
+            fromVolume: image1.mountPoint,
+            toVolume: image2.mountPoint,
+            testRsrcFork: image1.supportsResourceFork && image2.supportsResourceFork,
+            testXattr: image1.supportsExtendedAttributes && image2.supportsExtendedAttributes
+        )
     }
 
-    private func testMoveItems(fromVolume vol1: URL, toVolume vol2: URL, testRsrcFork: Bool) throws {
+    private func testMoveItems(fromVolume vol1: URL, toVolume vol2: URL, testRsrcFork: Bool, testXattr: Bool) throws {
         let test1 = vol1.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: test1, withIntermediateDirectories: true)
         defer { _ = try? FileManager.default.removeItem(at: test1) }
@@ -901,25 +915,32 @@ struct CSFileManagerTests {
 
         let fileContents = "some file contents".data(using: .utf8)!
         let attribute = ExtendedAttribute(
-            key: "com.charlessoft.CSFileManager.test-attribute",
+            key: "user.com.charlessoft.CSFileManager.test-attribute",
             data: "arbitrary attribute".data(using: .utf8)!
         )
 
+#if canImport(Darwin)
         let rsrcFork = ExtendedAttribute(
             key: XATTR_RESOURCEFORK_NAME,
             data: "you never know, something could use this".data(using: .utf8)!
         )
+#endif
 
         func setupFile(src: URL, dst: URL) throws {
             try? CSFileManager.shared.removeItem(at: FilePath(src.path))
             try? CSFileManager.shared.removeItem(at: FilePath(dst.path))
 
             try fileContents.write(to: src)
-            try attribute.write(to: FilePath(src.path))
 
+            if testXattr {
+                try attribute.write(to: FilePath(src.path))
+            }
+
+#if canImport(Darwin)
             if testRsrcFork {
                 try rsrcFork.write(to: FilePath(src.path))
             }
+#endif
         }
 
         func setupFolder(src: URL, dst: URL) throws {
@@ -927,7 +948,10 @@ struct CSFileManagerTests {
             try? CSFileManager.shared.removeItem(at: FilePath(dst.path))
 
             try CSFileManager.shared.createDirectory(at: FilePath(src.path), recursively: true)
-            try attribute.write(to: FilePath(src.path))
+
+            if testXattr {
+                try attribute.write(to: FilePath(src.path))
+            }
 
             try setupFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
         }
@@ -936,17 +960,26 @@ struct CSFileManagerTests {
             #expect(try !CSFileManager.shared.itemIsReachable(at: FilePath(src.path)))
             #expect(try Data(contentsOf: dst) == fileContents)
 
-            if testRsrcFork {
-                #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute, rsrcFork])
-            } else {
-                #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute])
+
+            if testXattr {
+#if canImport(Darwin)
+                let expectedAttributes: Set<ExtendedAttribute> = testRsrcFork ? [attribute, rsrcFork] : [attribute]
+#else
+                let expectedAttributes: Set<ExtendedAttribute> = [attribute]
+#endif
+
+                #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == expectedAttributes)
             }
         }
 
         func verifyFolder(src: URL, dst: URL) throws {
             #expect(try !CSFileManager.shared.itemIsReachable(at: FilePath(src.path)))
             #expect(try CSFileManager.shared.typeOfItem(at: FilePath(dst.path)) == .directory)
-            #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute])
+
+            if testXattr {
+                #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute])
+            }
+
             try verifyFile(src: src.appending(path: "content_file"), dst: dst.appending(path: "content_file"))
         }
 
@@ -1129,16 +1162,16 @@ struct CSFileManagerTests {
 #endif
     }
 
-    @Test
-    func testReplaceItems() throws {
-        for image1 in Self.diskImages.values {
-            for image2 in Self.diskImages.values {
-                try self.testReplaceItems(fromVolume: image1.mountPoint, toVolume: image2.mountPoint)
-            }
-        }
+    @Test(arguments: [nil] + withFixtures.images, [nil] + withFixtures.images)
+    func testReplaceItems(image1: DiskImage?, image2: DiskImage?) throws {
+        try self.testReplaceItems(
+            fromVolume: image1.mountPoint,
+            toVolume: image2.mountPoint,
+            testXattrs: image1.supportsExtendedAttributes && image2.supportsExtendedAttributes
+        )
     }
 
-    private func testReplaceItems(fromVolume vol1: URL, toVolume vol2: URL) throws {
+    private func testReplaceItems(fromVolume vol1: URL, toVolume vol2: URL, testXattrs: Bool) throws {
         let testDir1 = FilePath(vol1.path).appending(UUID().uuidString)
         try CSFileManager.shared.createDirectory(at: testDir1, mode: 0o755, recursively: false)
         defer { try? CSFileManager.shared.removeItem(at: testDir1, recursively: true) }
@@ -1153,8 +1186,8 @@ struct CSFileManagerTests {
         let file1Data = "testing 1 2 3".data(using: .utf8)!
         let file2Data = "testing 2 3 4".data(using: .utf8)!
 
-        let xattrName1 = "xattr1"
-        let xattrName2 = "xattr2"
+        let xattrName1 = "user.xattr1"
+        let xattrName2 = "user.xattr2"
 
         let xattrValue1 = "some xattr string"
         let xattrValue2 = "something else"
@@ -1166,201 +1199,278 @@ struct CSFileManagerTests {
             try file1Data.write(to: URL(filePath: file1.string), options: .atomic)
             try file2Data.write(to: URL(filePath: file2.string), options: .atomic)
 
-            xattrValue1.data(using: .utf8)!.withUnsafeBytes { str in
-                #expect(setxattr(file1.string, xattrName1, str.baseAddress, str.count, 0, 0) == 0)
-            }
-            
-            xattrValue2.data(using: .utf8)!.withUnsafeBytes { str in
-                #expect(setxattr(file2.string, xattrName2, str.baseAddress, str.count, 0, 0) == 0)
+            if testXattrs {
+                try xattrValue1.data(using: .utf8)!.withUnsafeBytes { str in
+                    try ExtendedAttribute(key: xattrName1, data: str).write(to: file1)
+                }
+
+                try xattrValue2.data(using: .utf8)!.withUnsafeBytes { str in
+                    try ExtendedAttribute(key: xattrName2, data: str).write(to: file2)
+                }
             }
         }
 
         func xattrNames(at path: FilePath) throws -> Set<String> {
-            let bufsize = try callPOSIXFunction(expect: .nonNegative) { listxattr(path.string, nil, 0, 0) }
-            let buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: bufsize)
-            defer { buf.deallocate() }
+            let xattr = try ExtendedAttribute.list(at: path)
 
-            let size = try callPOSIXFunction(expect: .nonNegative) { listxattr(path.string, buf.baseAddress, buf.count, 0) }
-
-            return Set(buf[..<size].split(separator: 0).map { String(decoding: $0, as: UTF8.self) })
+            return Set(xattr.map(\.key))
         }
 
         func xattr(at path: FilePath, forKey key: String) throws -> String {
-            let bufsize = try callPOSIXFunction(expect: .nonNegative) { getxattr(path.string, key, nil, 0, 0, 0) }
-            let buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: bufsize)
-            defer { buf.deallocate() }
+            let xattr = try ExtendedAttribute(at: path, key: key)
 
-            let size = try callPOSIXFunction(expect: .nonNegative) {
-                getxattr(path.string, key, buf.baseAddress, buf.count, 0, 0)
+            guard let stringValue = String(data: Data(xattr.data), encoding: .utf8) else {
+                throw CocoaError(.fileReadUnknown)
             }
 
-            return String(decoding: buf[..<size], as: UTF8.self)
+            return stringValue
         }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(at: file1, withItemAt: file2)
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         self.expectNoSuchFile(file2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(at: file1, withItemAt: file2, options: .withoutDeletingBackupItem)
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(at: file1, withItemAt: file2, options: .usingNewMetadataOnly)
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         self.expectNoSuchFile(file2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             at: file1,
             withItemAt: file2,
             options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
         )
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
 
+#if canImport(Darwin)
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(atPath: file1.string, withItemAtPath: file2.string)
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         self.expectNoSuchFile(file2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             atPath: file1.string,
             withItemAtPath: file2.string,
             options: .withoutDeletingBackupItem
         )
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             atPath: file1.string,
             withItemAtPath: file2.string,
             options: .usingNewMetadataOnly
         )
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         self.expectNoSuchFile(file2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             atPath: file1.string,
             withItemAtPath: file2.string,
             options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
         )
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
+#endif
 
 #if Foundation
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(at: URL(filePath: file1.string), withItemAt: URL(filePath: file2.string))
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try URL(filePath: file2.string).checkResourceIsReachable()
             }?.isFileNotFoundError == true
         )
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             at: URL(filePath: file1.string),
             withItemAt: URL(filePath: file2.string),
             options: .withoutDeletingBackupItem
         )
-        #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1, xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             at: URL(filePath: file1.string),
             withItemAt: URL(filePath: file2.string),
             options: .usingNewMetadataOnly
         )
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
         self.expectNoSuchFile(file2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+        }
 
         try setUpFiles()
-        #expect(try xattrNames(at: file1) == [xattrName1])
-        #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
-        #expect(try xattrNames(at: file2) == [xattrName2])
-        #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName1])
+            #expect(try xattr(at: file1, forKey: xattrName1) == xattrValue1)
+            #expect(try xattrNames(at: file2) == [xattrName2])
+            #expect(try xattr(at: file2, forKey: xattrName2) == xattrValue2)
+        }
         try CSFileManager.shared.replaceItem(
             at: URL(filePath: file1.string),
             withItemAt: URL(filePath: file2.string),
             options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
         )
-        #expect(try xattrNames(at: file1) == [xattrName2])
-        #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
-        #expect(try xattrNames(at: file2) == [xattrName1])
-        #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        #expect(try Data(contentsOf: URL(filePath: file1.string)) == file2Data)
+        #expect(try Data(contentsOf: URL(filePath: file2.string)) == file1Data)
+        if testXattrs {
+            #expect(try xattrNames(at: file1) == [xattrName2])
+            #expect(try xattr(at: file1, forKey: xattrName2) == xattrValue2)
+            #expect(try xattrNames(at: file2) == [xattrName1])
+            #expect(try xattr(at: file2, forKey: xattrName1) == xattrValue1)
+        }
 #endif
     }
+}
+
+fileprivate extension CSFileManagerTests.DiskImage? {
+    var supportsResourceFork: Bool {
+        self?.info.fileSystem.supportsResourceFork ?? CSFileManagerTests.hostSupportsResourceFork
+    }
+
+    var supportsExtendedAttributes: Bool {
+        self?.info.fileSystem.supportsExtendedAttributes ?? true
+    }
+
+    var mountPoint: URL { self?.mountPoint ?? FileManager.default.temporaryDirectory }
 }
