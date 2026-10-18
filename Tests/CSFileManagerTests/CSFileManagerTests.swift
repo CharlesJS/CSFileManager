@@ -147,19 +147,6 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).lastPathComponent.count == 32)
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL()
-        defer {
-            try? handle.close()
-            try? CSFileManager.shared.removeItem(at: url)
-        }
-
-        #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
-        #expect(url.lastPathComponent.count == 32)
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
 
     @Test
@@ -184,16 +171,6 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).lastPathComponent.count == 32)
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(directory: URL(filePath: directory))
-        defer { try? handle.close() }
-
-        #expect(url.path.starts(with: directory.string))
-        #expect(url.lastPathComponent.count == 32)
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
 
     @Test
@@ -227,21 +204,6 @@ struct CSFileManagerTests {
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
 
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX")
-        defer {
-            try? handle.close()
-            try? CSFileManager.shared.removeItem(at: url)
-        }
-
-        #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
-        #expect(url.lastPathComponent.count == 8)
-        #expect(url.lastPathComponent.prefix(3) == "foo")
-        #expect(url.lastPathComponent.suffix(5) != "XXXXX")
-        #expect(url.pathExtension == "")
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
 
     @Test
@@ -279,23 +241,6 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
-        defer {
-            try? handle.close()
-            try? CSFileManager.shared.removeItem(at: url)
-        }
-
-        #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
-        #expect(url.lastPathComponent.count == 15)
-        #expect(url.lastPathComponent.prefix(3) == "foo")
-        #expect(url.lastPathComponent.prefix(8).suffix(5) != "XXXXX")
-        #expect(url.lastPathComponent.suffix(7) == "bar.baz")
-        #expect(url.pathExtension == "baz")
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
     
     @Test
@@ -337,23 +282,6 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
-        defer {
-            try? handle.close()
-            try? CSFileManager.shared.removeItem(at: url)
-        }
-
-        #expect(url.path.starts(with: "/tmp/"))
-        #expect(url.lastPathComponent.count == 15)
-        #expect(url.lastPathComponent.prefix(3) == "foo")
-        #expect(url.lastPathComponent.prefix(8).suffix(5) != "XXXXX")
-        #expect(url.lastPathComponent.suffix(7) == "bar.baz")
-        #expect(url.pathExtension == "baz")
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
 
     @Test
@@ -395,22 +323,6 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
-#if Foundation
-        let (handle, url) = try CSFileManager.shared.createTemporaryFileURL(template: "fooXXXXX", suffix: "bar.baz")
-        defer {
-            try? handle.close()
-            try? CSFileManager.shared.removeItem(at: url)
-        }
-
-        #expect(url.path.starts(with: "/tmp/"))
-        #expect(url.lastPathComponent.count == 15)
-        #expect(url.lastPathComponent.prefix(3) == "foo")
-        #expect(url.lastPathComponent.suffix(7) == "bar.baz")
-        #expect(url.pathExtension == "baz")
-        try handle.write(contentsOf: "Foo Bar Baz".data(using: .ascii)!)
-        #expect(try String(data: Data(contentsOf: url), encoding: .ascii) == "Foo Bar Baz")
-#endif
     }
 
     @Test

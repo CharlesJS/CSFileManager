@@ -52,34 +52,6 @@ extension CSFileManager {
         return URL(fileURLWithPath: self.temporaryDirectory.string, isDirectory: true)
     }
 
-    public func createTemporaryFileURL(
-        directory: URL? = nil,
-        template: String? = nil,
-        suffix: String? = nil
-    ) throws -> (FileHandle, URL) {
-        guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
-            let (fd, path) = try self.createTemporaryFileWithStringPath(
-                directory: directory?.path,
-                template: template,
-                suffix: suffix
-            )
-
-            return (FileHandle(fileDescriptor: fd), URL(fileURLWithPath: path))
-        }
-
-        let (fd, path) = try self.createTemporaryFile(
-            directory: directory.map { FilePath($0.path) },
-            template: template, 
-            suffix: suffix
-        )
-
-        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *), versionCheck(12) else {
-            return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: String(describing: path)))
-        }
-        
-        return (FileHandle(fileDescriptor: fd.rawValue), URL(fileURLWithPath: path.string))
-    }
-
     public func createItemReplacementDirectoryWithURL(for url: URL?, mode: mode_t = 0o755) throws -> URL {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *), versionCheck(11) else {
             return try URL(
