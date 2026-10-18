@@ -22,29 +22,29 @@ let package = Package(
         "Foundation"
     ],
     dependencies: [
-        .package(
-            url: "https://github.com/CharlesJS/CSErrors",
-            from: "2.0.0",
-            traits: [
-                .trait(name: "Foundation", condition: .when(traits: ["Foundation"]))
-            ]
-        ),
-        .package(
-            url: "https://github.com/CharlesJS/CSFileInfo",
-            from: "0.5.0",
-            traits: [
-                .trait(name: "Foundation", condition: .when(traits: ["Foundation"]))
-            ]
-        ),
-        .package(url: "https://github.com/CharlesJS/SyncPolyfill", from: "0.1.0"),
+        .package(url: "https://github.com/CharlesJS/CSErrors", from: "2.1.1", traits: [
+            .trait(name: "Foundation", condition: .when(traits: ["Foundation"]))
+        ]),
+        .package(url: "https://github.com/CharlesJS/CSFileInfo", from: "0.6.5", traits: [
+            .trait(name: "Foundation", condition: .when(traits: ["Foundation"]))
+        ]),
+        .package(url: "https://github.com/CharlesJS/SyncPolyfill", from: "0.1.2"),
+        .package(url: "https://github.com/CharlesJS/test-helpers.git", from: "0.3.11"),
     ],
     targets: [
+        .systemLibrary(
+            name: "CSFileManager_CShims",
+            providers: [
+                .apt(["uuid-dev"]),
+            ]
+        ),
         .target(
             name: "CSFileManager",
             dependencies: [
                 "CSErrors",
                 "CSFileInfo",
                 "SyncPolyfill",
+                .targetItem(name: "CSFileManager_CShims", condition: .when(platforms: [.linux]))
             ]
         ),
         .testTarget(
@@ -52,6 +52,7 @@ let package = Package(
             dependencies: [
                 "CSFileManager",
                 "CSFileInfo",
+                .product(name: "DiskImageHelper", package: "test-helpers")
             ]
         ),
     ]

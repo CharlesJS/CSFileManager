@@ -1,11 +1,17 @@
 import CSErrors
 import CSFileInfo
-import System
 
 #if canImport(Darwin)
 import Darwin
 #else
 import Glibc
+import CSFileManager_CShims
+#endif
+
+#if canImport(SystemPackage)
+import SystemPackage
+#else
+import System
 #endif
 
 public struct CSFileManager: Sendable {
@@ -35,9 +41,11 @@ public struct CSFileManager: Sendable {
                 self = .blockSpecial
             case S_IFSOCK:
                 self = .socket
+#if canImport(Darwin)
             case S_IFWHT:
                 // Should not be reached in practice since this type is considered obsolete
                 self = .whiteout
+#endif
             default:
                 // Should be unreachable unless new node types are added to the file system that we don't recognize here
                 return nil
@@ -70,28 +78,37 @@ public struct CSFileManager: Sendable {
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public var temporaryDirectory: FilePath {
-        FilePath(self.temporaryDirectoryStringPath)
+        guard let tmpDir = getenv("TMPDIR"), strlen(tmpDir) != 0 else {
+            return "/tmp"
+        }
+
+        return FilePath(platformString: tmpDir)
     }
 
+#if canImport(Darwin)
     public var temporaryDirectoryStringPath: String {
-        getenv("TMPDIR").flatMap {
-            guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
-                return String(cString: $0)
-            }
+        guard let tmpDir = getenv("TMPDIR"), strlen(tmpDir) != 0 else {
+            return "/tmp"
+        }
 
-            return String(platformString: $0)
-        } ?? "/tmp"
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            return String(cString: tmpDir)
+        }
+
+        return String(platformString: tmpDir)
     }
+#endif
 
     private func generateUUID() -> String {
-        let ptr = UnsafeMutablePointer<CChar>.allocate(capacity: 37)
-        defer { ptr.deallocate() }
+        withUnsafeTemporaryAllocation(of: CChar.self, capacity: 37) {
+            let ptr = $0.baseAddress!
 
-        var uuid = uuid_t(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-        uuid_generate(&uuid)
-        uuid_unparse(&uuid, ptr)
+            var uuid = uuid_t(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            uuid_generate(&uuid)
+            uuid_unparse(&uuid, ptr)
 
-        return String(cString: ptr)
+            return String(cString: ptr)
+        }
     }
 
     private static let defaultTemplate = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
@@ -105,6 +122,7 @@ public struct CSFileManager: Sendable {
         let tempDir = directory ?? self.temporaryDirectory
         let template = t ?? Self.defaultTemplate
 
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             let templatePath = String(decoding: tempDir) + "/" + template
 
@@ -114,6 +132,7 @@ public struct CSFileManager: Sendable {
                 }
             }
         }
+#endif
 
         let templatePath = tempDir.appending(template)
 
@@ -124,6 +143,7 @@ public struct CSFileManager: Sendable {
         }
     }
 
+#if canImport(Darwin)
     public func createTemporaryFileWithStringPath(
         directory: String? = nil,
         template: String? = nil,
@@ -157,57 +177,59 @@ public struct CSFileManager: Sendable {
 
         return (desc.rawValue, path.string)
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func createItemReplacementDirectory(for destination: FilePath? = nil, mode: mode_t = 0o755) throws -> FilePath {
-        let directory = self.getItemReplacementDirectory(for: destination)
+        let directory = try self.getItemReplacementDirectory(for: destination)
 
         try self.createDirectory(at: directory, mode: mode, recursively: true)
 
         return directory
     }
 
-    public func createItemReplacementDirectoryWithStringPath(
-        forPath destination: String? = nil,
-        mode: mode_t = 0o755
-    ) throws -> String {
-        let directory = self.getItemReplacementDirectory(for: destination)
+#if canImport(Darwin)
+    public func createItemReplacementDirectory(forPath destination: String? = nil, mode: mode_t = 0o755) throws -> String {
+        let directory = try self.getItemReplacementDirectory(for: destination)
 
         try self.createDirectory(atPath: directory, mode: mode, recursively: true)
 
         return directory
     }
+#endif
 
     private func generateItemReplacementDirectoryName() -> String {
         "CSFileManager_ItemReplacement_\(self.generateUUID())"
     }
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
-    private func getItemReplacementDirectory(for destination: FilePath?) -> FilePath {
+    private func getItemReplacementDirectory(for destination: FilePath?) throws -> FilePath {
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
-            return FilePath(self.getItemReplacementDirectory(for: destination.map { String(describing: $0) }))
+            return try FilePath(self.getItemReplacementDirectory(for: destination.map { String(describing: $0) }))
         }
+#endif
 
         let tempPath = self.temporaryDirectory
 
         if let destination,
-           var destVolume = (try? FileInfo(at: destination, keys: .volumeUUID))?.volumeUUID,
-           var tempVolume = (try? FileInfo(at: tempPath, keys: .volumeUUID))?.volumeUUID,
-           uuid_compare(&destVolume, &tempVolume) != 0 {
+           let tempVolume = try FileInfo(at: tempPath, keys: .fileSystemID).fileSystemID,
+           try FileInfo(at: destination, keys: .fileSystemID).fileSystemID != tempVolume {
             return destination.removingLastComponent().appending(self.generateItemReplacementDirectoryName())
         }
 
         return tempPath.appending(self.generateItemReplacementDirectoryName())
     }
 
-    private func getItemReplacementDirectory(for destination: String?) -> String {
+#if canImport(Darwin)
+    private func getItemReplacementDirectory(for destination: String?) throws -> String {
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             let tempPath = self.temporaryDirectoryStringPath
 
             if let destination,
-               var destVolume = (try? FileInfo(atPath: destination, keys: .volumeUUID))?.volumeUUID,
-               var tempVolume = (try? FileInfo(atPath: tempPath, keys: .volumeUUID))?.volumeUUID,
-               uuid_compare(&destVolume, &tempVolume) != 0 {
+               let destVolume = (try? FileInfo(atPath: destination, keys: .fileSystemID))?.fileSystemID,
+               let tempVolume = (try? FileInfo(atPath: tempPath, keys: .fileSystemID))?.fileSystemID,
+               destVolume != tempVolume {
                 let parent = destination.lastIndex(of: "/").map { destination[..<$0] } ?? tempPath[...]
 
                 return "\(parent)/\(self.generateItemReplacementDirectoryName())"
@@ -216,8 +238,9 @@ public struct CSFileManager: Sendable {
             return "\(tempPath)/\(self.generateItemReplacementDirectoryName())"
         }
 
-        return self.getItemReplacementDirectory(for: destination.map { FilePath($0) }).string
+        return try self.getItemReplacementDirectory(for: destination.map { FilePath($0) }).string
     }
+#endif
 
     private func createTemporaryFile<T>(
         templatePath: UnsafePointer<CChar>,
@@ -264,6 +287,7 @@ public struct CSFileManager: Sendable {
         }
     }
 
+#if canImport(Darwin)
     public func itemIsReachable(atPath path: String) throws -> Bool {
         do {
             _ = try self.typeOfItem(atPath: path)
@@ -276,12 +300,15 @@ public struct CSFileManager: Sendable {
             throw error
         }
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func typeOfItem(at path: FilePath) throws -> FileType {
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             return try path.withCString { try self.typeOfItem(path: String(decoding: path), cPath: $0) }
         }
+#endif
 
         return try path.withPlatformString { try self.typeOfItem(path: path.string, cPath: $0) }
     }
@@ -291,6 +318,7 @@ public struct CSFileManager: Sendable {
         try self.typeOfItem(fileDescriptor: fileDescriptor.rawValue)
     }
 
+#if canImport(Darwin)
     public func typeOfItem(atPath path: String) throws -> FileType {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             return try path.withCString { try self.typeOfItem(path: path, cPath: $0) }
@@ -298,24 +326,33 @@ public struct CSFileManager: Sendable {
 
         return try self.typeOfItem(at: FilePath(path))
     }
+#endif
 
     public func typeOfItem(fileDescriptor: Int32) throws -> FileType {
         let info = try callPOSIXFunction(expect: .zero) { fstat(fileDescriptor, $0) }
 
         guard let type = FileType(permissionsMode: info.st_mode) else {
             // Should be unreachable unless new node types are added to the file system that we don't recognize here
+#if canImport(Darwin)
             throw errno(EFTYPE)
+#else
+            throw errno(EINVAL)
+#endif
         }
 
         return type
     }
 
-    private func typeOfItem(path: String, cPath: UnsafePointer<Int8>) throws -> FileType {
+    private func typeOfItem(path: String, cPath: UnsafePointer<CChar>) throws -> FileType {
         let info = try callPOSIXFunction(expect: .zero, path: path) { lstat(cPath, $0) }
 
         guard let type = FileType(permissionsMode: info.st_mode) else {
             // Should be unreachable unless new node types are added to the file system that we don't recognize here
+#if canImport(Darwin)
             throw errno(EFTYPE, path: path)
+#else
+            throw errno(EINVAL, path: path)
+#endif
         }
 
         return type
@@ -323,6 +360,7 @@ public struct CSFileManager: Sendable {
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func contentsOfDirectory(at path: FilePath, recursively: Bool = false) throws -> some Sequence<FilePath> {
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             let pathString = String(decoding: path)
 
@@ -330,17 +368,21 @@ public struct CSFileManager: Sendable {
                 FilePath("\(pathString)/\($0)")
             }
         }
+#endif
 
         return POSIXDirectoryEnumerator(path: path.string, recursive: recursively).lazy.map { path.appending($0) }
     }
 
+#if canImport(Darwin)
     public func contentsOfDirectory(atPath path: String, recursively: Bool = false) throws -> some Sequence<String> {
         POSIXDirectoryEnumerator(path: path, recursive: recursively)
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func createDirectory(at path: FilePath, mode: mode_t = 0o755, recursively: Bool = false) throws {
         do {
+#if canImport(Darwin)
             guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
                 try path.withCString { cPath in
                     _ = try callPOSIXFunction(expect: .zero, path: path) { mkdir(cPath, mode) }
@@ -348,18 +390,23 @@ public struct CSFileManager: Sendable {
 
                 return
             }
+#endif
 
             try path.withPlatformString { cPath in
                 _ = try callPOSIXFunction(expect: .zero, path: path) { mkdir(cPath, mode) }
             }
         } catch {
             if recursively, error.isFileNotFoundError {
-                let parent = if #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), 
+#if canImport(Darwin)
+                let parent = if #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *),
                     versionCheck(12) {
                     path.removingLastComponent()
                 } else {
                     try FilePath(self.parentPath(forPath: String(decoding: path)))
                 }
+#else
+                let parent = path.removingLastComponent()
+#endif
 
                 try self.createDirectory(at: parent, mode: mode, recursively: true)
                 try self.createDirectory(at: path, mode: mode, recursively: false)
@@ -370,6 +417,7 @@ public struct CSFileManager: Sendable {
         }
     }
 
+#if canImport(Darwin)
     public func createDirectory(atPath path: String, mode: mode_t = 0o755, recursively: Bool = false) throws {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             do {
@@ -392,39 +440,247 @@ public struct CSFileManager: Sendable {
         try self.createDirectory(at: FilePath(path), mode: mode, recursively: recursively)
     }
 
-    @available(macOS, obsoleted: 12.0)
-    @available(iOS, obsoleted: 15.0)
-    @available(watchOS, obsoleted: 8.0)
-    @available(tvOS, obsoleted: 15.0)
-    @available(macCatalyst, obsoleted: 15.0)
-    @available(visionOS, unavailable)
     private func parentPath(forPath path: String) throws -> String {
         let bytes = try [UInt8](unsafeUninitializedCapacity: Int(MAXPATHLEN) + 1) { buffer, count in
-            count = strlen(try callPOSIXFunction(path: path) { dirname_r(path, buffer.baseAddress) })
+            count = strlen(try callPOSIXFunction(path: path) {
+                dirname_r(path, buffer.baseAddress)
+            })
         }
 
         return String(decoding: bytes, as: UTF8.self)
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
-    public func copyItem(at src: FilePath, to dst: FilePath) throws {
+    public func targetOfSymbolicLink(at path: FilePath) throws -> FilePath {
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
-            try src.withCString { cSrc in
-                try dst.withCString { cDst in
-                    try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: String(describing: dst))
+            let target = try path.withCString { cPath in
+                try String(unsafeUninitializedCapacity: Int(PATH_MAX) + 1) {
+                    try $0.withMemoryRebound(to: CChar.self) {
+                        try self.getSymlinkTarget(path: String(describing: path), cPath: cPath, buffer: $0)
+                    }
+                }
+            }
+
+            return FilePath(target)
+        }
+#endif
+
+        return try path.withPlatformString { cPath in
+            try withUnsafeTemporaryAllocation(of: CChar.self, capacity: Int(PATH_MAX) + 1) { buffer in
+                let len = try self.getSymlinkTarget(
+                    path: path.string,
+                    cPath: cPath,
+                    buffer: UnsafeMutableBufferPointer(rebasing: buffer.dropLast())
+                )
+
+                buffer[len] = 0
+
+                return FilePath(platformString: buffer.baseAddress!)
+            }
+        }
+    }
+
+    @available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, macCatalyst 16.0, *)
+    public func targetOfSymbolicLink(at file: FileDescriptor) throws -> FilePath {
+#if canImport(Darwin)
+        try withUnsafeTemporaryAllocation(of: CChar.self, capacity: Int(PATH_MAX) + 1) { buffer in
+            let len = try callPOSIXFunction(expect: .nonNegative) {
+                freadlink(file.rawValue, buffer.baseAddress, buffer.count - 1)
+            }
+            buffer[len] = 0
+
+            return FilePath(platformString: buffer.baseAddress!)
+        }
+#else
+        try self.targetOfSymbolicLink(at: FilePath("/proc/self/fd/\(file.rawValue)"))
+#endif
+    }
+
+    private func getSymlinkTarget(
+        path: String,
+        cPath: UnsafePointer<CChar>,
+        buffer: UnsafeMutableBufferPointer<CChar>
+    ) throws -> Int {
+        guard let baseAddress = buffer.baseAddress else { return 0 }
+
+        return try callPOSIXFunction(expect: .nonNegative, path: path) {
+            readlink(cPath, baseAddress, buffer.count)
+        }
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func createSymbolicLink(at path: FilePath, withTarget targetPath: FilePath) throws {
+#if canImport(Darwin)
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try path.withCString { cPath in
+                try targetPath.withCString { targetCPath in
+                    try self.createSymbolicLink(path: String(describing: path), cPath: cPath, targetCPath: targetCPath)
+                }
+            }
+
+            return
+        }
+#endif
+
+        try path.withPlatformString { cPath in
+            try targetPath.withPlatformString { targetCPath in
+                try self.createSymbolicLink(path: path.string, cPath: cPath, targetCPath: targetCPath)
+            }
+        }
+    }
+
+#if canImport(Darwin)
+    public func createSymbolicLink(atPath path: String, withTargetPath targetPath: String) throws {
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try path.withCString { cPath in
+                try targetPath.withCString { targetCPath in
+                    try self.createSymbolicLink(path: path, cPath: cPath, targetCPath: targetCPath)
                 }
             }
 
             return
         }
 
-        try src.withPlatformString { cSrc in
-            try dst.withPlatformString { cDst in
-                try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: dst.string)
+        try path.withPlatformString { cPath in
+            try targetPath.withPlatformString { targetCPath in
+                try self.createSymbolicLink(path: path, cPath: cPath, targetCPath: targetCPath)
             }
         }
     }
+#endif
 
+    private func createSymbolicLink(
+        path: String,
+        cPath: UnsafePointer<CChar>,
+        targetCPath: UnsafePointer<CChar>
+    ) throws {
+        try callPOSIXFunction(expect: .zero, path: path) { symlink(cPath, targetCPath) }
+    }
+
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    public func copyItem(at srcPath: FilePath, to dstPath: FilePath) throws {
+#if canImport(Darwin)
+        guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
+            try srcPath.withCString { cSrc in
+                try dstPath.withCString { cDst in
+                    try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: String(describing: dstPath))
+                }
+            }
+
+            return
+        }
+
+        try srcPath.withPlatformString { cSrc in
+            try dstPath.withPlatformString { cDst in
+                try self.copyItem(atCPath: cSrc, toCPath: cDst, errPath: dstPath.string)
+            }
+        }
+#else
+        let srcFile = try FileDescriptor.open(srcPath, .readOnly)
+        var dstFile: FileDescriptor? = nil
+
+        defer {
+            try? srcFile.close()
+            try? dstFile?.close()
+        }
+
+        let srcStat = try callPOSIXFunction(expect: .zero, path: srcPath) { fstat(srcFile.rawValue, $0) }
+
+        switch try self.typeOfItem(fileDescriptor: srcFile) {
+        case .regular:
+            dstFile = try FileDescriptor.open(
+                dstPath, .writeOnly,
+                options: [.create, .exclusiveCreate],
+                permissions: .init(rawValue: srcStat.st_mode)
+            )
+
+            let bytesCopied = copy_file_range(srcFile.rawValue, nil, dstFile!.rawValue, nil, srcStat.st_size, 0)
+            if bytesCopied < 0 {
+                if [EXDEV, EOPNOTSUPP].contains(errno) {
+                    let bufsize = 1024 * 1024
+                    var bytesLeft = srcStat.st_size
+
+                    while bytesLeft > 0 {
+                        let bytesSent = sendfile(dstFile!.rawValue, srcFile.rawValue, nil, min(bytesLeft, bufsize))
+
+                        if bytesSent < 0 {
+                            throw errno(path: dstPath)
+                        }
+
+                        bytesLeft -= bytesSent
+                    }
+                } else {
+                    throw errno(path: dstPath)
+                }
+            }
+        case .directory:
+            try callPOSIXFunction(expect: .zero, path: dstPath) {
+                dstPath.withPlatformString { mkdir($0, srcStat.st_mode) }
+            }
+
+            for srcItem in try self.contentsOfDirectory(at: srcPath) {
+                let dstItem = dstPath.appending(srcItem.lastComponent!)
+
+                try self.copyItem(at: srcItem, to: dstItem)
+            }
+
+            dstFile = try FileDescriptor.open(dstPath, .readOnly, options: .directory)
+        case .symbolicLink:
+            try self.createSymbolicLink(at: dstPath, withTarget: self.targetOfSymbolicLink(at: srcPath))
+
+            dstFile = try FileDescriptor.open(dstPath, .writeOnly)
+        case .fifo, .characterSpecial, .blockSpecial, .socket, .whiteout:
+            throw errno(EINVAL, path: srcPath)
+        }
+
+        do {
+            for eachXattr in try ExtendedAttribute.list(at: srcFile, options: .noTraverseLink) {
+                try eachXattr.write(to: dstFile!, options: .noTraverseLink)
+            }
+        } catch Errno.notSupported {}
+
+        try self.copyMetadata(from: srcFile, to: dstFile!, srcStat: srcStat, srcPath: srcPath, dstPath: dstPath)
+#endif
+    }
+
+#if !canImport(Darwin)
+    private func copyMetadata(
+        from src: FileDescriptor,
+        to dst: FileDescriptor,
+        srcStat: stat,
+        srcPath: FilePath,
+        dstPath: FilePath
+    ) throws {
+        try callPOSIXFunction(expect: .zero, path: dstPath, isWrite: true) {
+            let res = fchown(dst.rawValue, srcStat.st_uid, srcStat.st_gid)
+
+            if res != 0 && errno == EPERM {
+                return 0 as Int32
+            }
+
+            return res
+        }
+
+        if fchmod(dst.rawValue, srcStat.st_mode & 0o7777) != 0 && ![EPERM, EACCES].contains(errno) {
+            throw errno(path: dstPath, isWrite: true)
+        }
+        var ds = stat()
+        fstat(dst.rawValue, &ds)
+
+        try withUnsafeTemporaryAllocation(of: timespec.self, capacity: 2) {
+            $0[0] = srcStat.st_atim
+            $0[1] = srcStat.st_mtim
+
+            if futimens(dst.rawValue, $0.baseAddress) != 0 && ![EPERM, EACCES].contains(errno) {
+                throw errno(path: dstPath, isWrite: true)
+            }
+        }
+    }
+#endif
+
+#if canImport(Darwin)
     public func copyItem(atPath src: String, toPath dst: String) throws {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             try src.withCString { cSrc in
@@ -439,15 +695,17 @@ public struct CSFileManager: Sendable {
         return try self.copyItem(at: FilePath(src), to: FilePath(dst))
     }
 
-    private func copyItem(atCPath src: UnsafePointer<Int8>, toCPath dst: UnsafePointer<Int8>, errPath: String) throws {
+    private func copyItem(atCPath src: UnsafePointer<CChar>, toCPath dst: UnsafePointer<CChar>, errPath: String) throws {
         try callPOSIXFunction(expect: .zero, path: errPath) {
             let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_RECURSIVE)
             return copyfile(src, dst, nil, flags)
         }
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func moveItem(at src: FilePath, to dst: FilePath) throws {
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             try src.withCString { cSrc in
                 try dst.withCString { cDst in
@@ -463,8 +721,25 @@ public struct CSFileManager: Sendable {
                 try self.moveItem(atPath: cSrc, toPath: cDst, errPath: dst.string)
             }
         }
+#else
+        let ret = src.withPlatformString { cSrc in
+            dst.withPlatformString { cDst in
+                rename(cSrc, cDst)
+            }
+        }
+
+        if ret != 0 {
+            if errno == EXDEV {
+                try self.copyItem(at: src, to: dst)
+                try self.removeItem(at: src, recursively: true)
+            } else {
+                throw errno(path: dst)
+            }
+        }
+#endif
     }
 
+#if canImport(Darwin)
     public func moveItem(atPath src: String, toPath dst: String) throws {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             try src.withCString { cSrc in
@@ -479,7 +754,7 @@ public struct CSFileManager: Sendable {
         try self.moveItem(at: FilePath(src), to: FilePath(dst))
     }
 
-    private func moveItem(atPath src: UnsafePointer<Int8>, toPath dst: UnsafePointer<Int8>, errPath: String) throws {
+    private func moveItem(atPath src: UnsafePointer<CChar>, toPath dst: UnsafePointer<CChar>, errPath: String) throws {
         if rename(src, dst) != 0 {
             if errno == EXDEV {
                 try self.copyItem(atCPath: src, toCPath: dst, errPath: errPath)
@@ -489,6 +764,7 @@ public struct CSFileManager: Sendable {
             }
         }
     }
+#endif
 
     @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
     public func removeItem(at path: FilePath, recursively: Bool = false) throws {
@@ -500,18 +776,21 @@ public struct CSFileManager: Sendable {
             }
         }
 
+#if canImport(Darwin)
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             try path.withCString { cPath in
                 try self.removeItem(path: String(decoding: path), cPath: cPath, isDirectory: isDirectory)
             }
             return
         }
+#endif
 
         try path.withPlatformString { cPath in
             try self.removeItem(path: path.string, cPath: cPath, isDirectory: isDirectory)
         }
     }
 
+#if canImport(Darwin)
     public func removeItem(atPath path: String, recursively: Bool = false) throws {
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             let isDirectory = try self.typeOfItem(atPath: path) == .directory
@@ -531,8 +810,10 @@ public struct CSFileManager: Sendable {
 
         try self.removeItem(at: FilePath(path), recursively: recursively)
     }
+#endif
 
-    private func removeItem(cPath: UnsafePointer<Int8>, recursively: Bool) throws {
+    private func removeItem(cPath: UnsafePointer<CChar>, recursively: Bool) throws {
+#if canImport(Darwin)
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             try self.removeItem(atPath: String(cString: cPath), recursively: recursively)
             return
@@ -542,11 +823,12 @@ public struct CSFileManager: Sendable {
             try self.removeItem(at: FilePath(String(cString: cPath)), recursively: recursively)
             return
         }
+#endif
 
         try self.removeItem(at: FilePath(platformString: cPath), recursively: recursively)
     }
 
-    private func removeItem(path: String, cPath: UnsafePointer<Int8>, isDirectory: Bool) throws {
+    private func removeItem(path: String, cPath: UnsafePointer<CChar>, isDirectory: Bool) throws {
         try callPOSIXFunction(expect: .zero, path: path) { isDirectory ? rmdir(path) : unlink(path) }
     }
 
@@ -556,8 +838,9 @@ public struct CSFileManager: Sendable {
         withItemAt newPath: FilePath,
         options: ItemReplacementOptions = []
     ) throws {
-        let originalInfo = try FileInfo(at: originalPath, keys: [.volumeUUID, .volumeCapabilities, .volumeMountPoint])
-        let newInfo = try FileInfo(at: newPath, keys: [.volumeUUID, .volumeCapabilities, .volumeMountPoint])
+#if canImport(Darwin)
+        let originalInfo = try FileInfo(at: originalPath, keys: [.fileSystemID, .volumeCapabilities, .volumeMountPoint])
+        let newInfo = try FileInfo(at: newPath, keys: [.fileSystemID, .volumeCapabilities, .volumeMountPoint])
 
         guard #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, *), versionCheck(12) else {
             try originalPath.withCString { orig in
@@ -588,15 +871,25 @@ public struct CSFileManager: Sendable {
                 )
             }
         }
+#else
+        if let originalFSID = try FileInfo(at: originalPath, keys: .fileSystemID).fileSystemID,
+           let newFSID = try FileInfo(at: newPath, keys: .fileSystemID).fileSystemID,
+           originalFSID == newFSID {
+            try self.linuxExchange(originalPath: originalPath, newPath: newPath, options: options)
+        } else {
+            try self.crossVolumeExchange(originalPath: originalPath, newPath: newPath, options: options)
+        }
+#endif
     }
 
+#if canImport(Darwin)
     public func replaceItem(
         atPath originalPath: String,
         withItemAtPath newPath: String,
         options: ItemReplacementOptions = []
     ) throws {
-        let originalInfo = try FileInfo(atPath: originalPath, keys: [.volumeUUID, .volumeCapabilities])
-        let newInfo = try FileInfo(atPath: newPath, keys: [.volumeUUID, .volumeCapabilities])
+        let originalInfo = try FileInfo(atPath: originalPath, keys: [.fileSystemID, .volumeCapabilities])
+        let newInfo = try FileInfo(atPath: newPath, keys: [.fileSystemID, .volumeCapabilities])
 
         guard #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *), versionCheck(11) else {
             try originalPath.withCString { orig in
@@ -616,7 +909,7 @@ public struct CSFileManager: Sendable {
         }
 
         try self.replaceItem(at: FilePath(originalPath), withItemAt: FilePath(newPath), options: options)
-   }
+    }
 
     private func replaceItem(
         path: String,
@@ -626,9 +919,9 @@ public struct CSFileManager: Sendable {
         newInfo: FileInfo,
         options: ItemReplacementOptions
     ) throws {
-        if var originalUUID = originalInfo.volumeUUID,
-           var newUUID = newInfo.volumeUUID,
-           uuid_compare(&originalUUID, &newUUID) == 0,
+        if let originalFSID = originalInfo.fileSystemID,
+           let newFSID = newInfo.fileSystemID,
+           originalFSID == newFSID,
            let capabilities = originalInfo.volumeNativeCapabilities {
             if capabilities.interfaces.contains(.renameSwap) {
                 try self.renameSwap(path: path, originalCPath: originalCPath, newCPath: newCPath, options: options)
@@ -651,7 +944,7 @@ public struct CSFileManager: Sendable {
         options: ItemReplacementOptions
     ) throws {
         if !options.contains(.usingNewMetadataOnly) {
-            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
+            try self.copyExtendedAttributes(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
         }
 
         _ = try callPOSIXFunction(expect: .zero, path: path) {
@@ -706,8 +999,13 @@ public struct CSFileManager: Sendable {
                 }
             }
         } else {
-            let preserveFrom = options.contains(.withoutDeletingBackupItem)
-            try self.copyMetadata(path: path, from: newCPath, to: originalCPath, swap: true, preserveFrom: preserveFrom)
+            try self.copyExtendedAttributes(
+                path: path,
+                from: newCPath,
+                to: originalCPath,
+                swap: true,
+                preserveFrom: options.contains(.withoutDeletingBackupItem)
+            )
         }
 
         if !options.contains(.withoutDeletingBackupItem) {
@@ -722,38 +1020,121 @@ public struct CSFileManager: Sendable {
         options: ItemReplacementOptions
     ) throws {
         if !options.contains(.usingNewMetadataOnly) {
-            try self.copyMetadata(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
+            try self.copyExtendedAttributes(path: path, from: originalCPath, to: newCPath, swap: false, preserveFrom: true)
         }
 
         let len = strlen(newCPath)
         let uuidLen = MemoryLayout<uuid_string_t>.size
-        let tempPath = UnsafeMutablePointer<CChar>.allocate(capacity: len + 6 + uuidLen + 1)
-        defer { tempPath.deallocate() }
+        try withUnsafeTemporaryAllocation(of: CChar.self, capacity: len + 6 + uuidLen + 1) {
+            let tempPath = $0.baseAddress!
 
-        let uuid = UnsafeMutablePointer<UInt8>.allocate(capacity: MemoryLayout<uuid_t>.stride)
-        defer { uuid.deallocate() }
-        uuid_generate(uuid)
+            try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: MemoryLayout<uuid_t>.stride) {
+                let uuid = $0.baseAddress!
+                uuid_generate(uuid)
 
-        let uuidString = UnsafeMutablePointer<UInt8>.allocate(capacity: uuidLen)
-        defer { uuidString.deallocate() }
-        uuid_unparse(uuid, uuidString)
+                try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: uuidLen) {
+                    let uuidString = $0.baseAddress!
 
-        strncpy(tempPath, newCPath, len)
-        strncpy(tempPath + len, ".swap.", 6)
-        strncpy(tempPath + len + 6, uuidString, uuidLen)
-        tempPath[len + 6 + uuidLen] = 0
+                    uuid_unparse(uuid, uuidString)
 
-        try self.moveItem(atPath: originalCPath, toPath: tempPath, errPath: String(cString: tempPath))
-        try self.moveItem(atPath: newCPath, toPath: originalCPath, errPath: String(cString: originalCPath))
+                    strncpy(tempPath, newCPath, len)
+                    strncpy(tempPath + len, ".swap.", 6)
+                    strncpy(tempPath + len + 6, uuidString, uuidLen)
+                    tempPath[len + 6 + uuidLen] = 0
 
-        if options.contains(.withoutDeletingBackupItem) {
-            try self.moveItem(atPath: tempPath, toPath: newCPath, errPath: String(cString: newCPath))
+                    try self.moveItem(atPath: originalCPath, toPath: tempPath, errPath: String(cString: tempPath))
+                    try self.moveItem(atPath: newCPath, toPath: originalCPath, errPath: String(cString: originalCPath))
+
+                    if options.contains(.withoutDeletingBackupItem) {
+                        try self.moveItem(atPath: tempPath, toPath: newCPath, errPath: String(cString: newCPath))
+                    } else {
+                        try self.removeItem(cPath: tempPath, recursively: true)
+                    }
+                }
+            }
+        }
+    }
+#else
+    private func linuxExchange(originalPath: FilePath, newPath: FilePath, options: ItemReplacementOptions) throws {
+        let ret = try originalPath.withPlatformString { originalCPath in
+            try newPath.withPlatformString { newCPath in
+                if !options.contains(.usingNewMetadataOnly) {
+                    try self.copyExtendedAttributes(
+                        path: originalPath.string,
+                        from: originalCPath,
+                        to: newCPath,
+                        swap: false,
+                        preserveFrom: true
+                    )
+                }
+
+                return renameat2(AT_FDCWD, newCPath, AT_FDCWD, originalCPath, UInt32(bitPattern: RENAME_EXCHANGE))
+            }
+        }
+
+        if ret == 0 {
+            if !options.contains(.withoutDeletingBackupItem) {
+                try self.removeItem(at: newPath, recursively: true)
+            }
+        } else if [EINVAL, EXDEV].contains(errno) {
+            let tempName = "\(newPath.lastComponent ?? "").swap.\(self.generateUUID())"
+            let tempPath = newPath.removingLastComponent().appending(tempName)
+
+            try self.moveItem(at: originalPath, to: tempPath)
+            try self.moveItem(at: newPath, to: originalPath)
+
+            if options.contains(.withoutDeletingBackupItem) {
+                try self.moveItem(at: tempPath, to: newPath)
+            } else {
+                try self.removeItem(at: tempPath, recursively: true)
+            }
         } else {
-            try self.removeItem(cPath: tempPath, recursively: true)
+            throw errno(path: originalPath)
         }
     }
 
-    private func copyMetadata(
+    private func crossVolumeExchange(originalPath: FilePath, newPath: FilePath, options: ItemReplacementOptions) throws {
+        let tempDir = try self.createItemReplacementDirectory(for: originalPath)
+        defer { try? self.removeItem(at: tempDir) }
+
+        let stagingPath = tempDir.appending(self.generateUUID())
+
+        try self.copyItem(at: newPath, to: stagingPath)
+
+        if !options.contains(.usingNewMetadataOnly) {
+            do {
+                try originalPath.withPlatformString { originalCPath in
+                    try stagingPath.withPlatformString { stagingCPath in
+                        try self.copyExtendedAttributes(
+                            path: originalPath.string,
+                            from: originalCPath,
+                            to: stagingCPath,
+                            swap: false,
+                            preserveFrom: true
+                        )
+                    }
+                }
+            } catch Errno.notSupported {}
+        }
+
+        let tempPath = originalPath.removingLastComponent().appending(".swap.\(self.generateUUID())")
+
+        try self.moveItem(at: originalPath, to: tempPath)
+        try self.moveItem(at: stagingPath, to: originalPath)
+
+        if options.contains(.withoutDeletingBackupItem) {
+            let newTempPath = newPath.removingLastComponent().appending(".swap.\(self.generateUUID())")
+
+            try self.moveItem(at: tempPath, to: newTempPath)
+            try self.removeItem(at: newPath)
+            try self.moveItem(at: newTempPath, to: newPath)
+        } else {
+            try self.removeItem(at: newPath)
+        }
+    }
+#endif
+
+    private func copyExtendedAttributes(
         path: String,
         from: UnsafePointer<CChar>,
         to: UnsafePointer<CChar>,

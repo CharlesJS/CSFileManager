@@ -1,0 +1,4 @@
+module CSFileManager_CShims {
+    umbrella header "cshims.h"
+    export *
+}
