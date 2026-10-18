@@ -83,7 +83,9 @@ struct CSFileManagerTests {
     @Test
     func testRootDirectory() {
         #expect(CSFileManager.shared.rootDirectory == "/")
+#if canImport(Darwin)
         #expect(CSFileManager.shared.rootDirectoryStringPath == "/")
+#endif
 #if Foundation
         #expect(CSFileManager.shared.rootDirectoryURL == URL(filePath: "/"))
 #endif
@@ -92,7 +94,9 @@ struct CSFileManagerTests {
     @Test
     func testHomeDirectory() {
         #expect(CSFileManager.shared.homeDirectoryForCurrentUser == FilePath(NSHomeDirectory()))
+#if canImport(Darwin)
         #expect(CSFileManager.shared.homeDirectoryStringPathForCurrentUser == NSHomeDirectory())
+#endif
 #if Foundation
         #expect(
             CSFileManager.shared.homeDirectoryURLForCurrentUser ==
@@ -104,7 +108,9 @@ struct CSFileManagerTests {
     @Test
     func testTemporaryDirectory() {
         #expect(CSFileManager.shared.temporaryDirectory == FilePath(FileManager.default.temporaryDirectory.path))
+#if canImport(Darwin)
         #expect(CSFileManager.shared.temporaryDirectoryStringPath == FileManager.default.temporaryDirectory.path + "/")
+#endif
 #if Foundation
         #expect(CSFileManager.shared.temporaryDirectoryURL == FileManager.default.temporaryDirectory)
 #endif
@@ -112,12 +118,23 @@ struct CSFileManagerTests {
 
     @Test
     func testTemporaryDirectoryFallback() {
-        let oldTmpDir = String(cString: getenv("TMPDIR"))
-        defer { setenv("TMPDIR", oldTmpDir, 1) }
+        let oldTmpDir = getenv("TMPDIR").map { String(cString: $0) }
+        defer { setenv("TMPDIR", oldTmpDir ?? "", 1) }
         unsetenv("TMPDIR")
 
         #expect(CSFileManager.shared.temporaryDirectory == FilePath("/tmp"))
+#if canImport(Darwin)
         #expect(CSFileManager.shared.temporaryDirectoryStringPath == "/tmp")
+#endif
+#if Foundation
+        #expect(CSFileManager.shared.temporaryDirectoryURL == URL(filePath: "/tmp/"))
+#endif
+
+        setenv("TMPDIR", "", 1)
+        #expect(CSFileManager.shared.temporaryDirectory == FilePath("/tmp"))
+#if canImport(Darwin)
+        #expect(CSFileManager.shared.temporaryDirectoryStringPath == "/tmp")
+#endif
 #if Foundation
         #expect(CSFileManager.shared.temporaryDirectoryURL == URL(filePath: "/tmp/"))
 #endif
@@ -137,6 +154,7 @@ struct CSFileManagerTests {
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath()
         defer {
             close(fdInt)
@@ -147,6 +165,7 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).lastPathComponent.count == 32)
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
+#endif
     }
 
     @Test
@@ -164,6 +183,7 @@ struct CSFileManagerTests {
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(directory: directory.string)
         defer { close(fdInt) }
 
@@ -171,25 +191,27 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).lastPathComponent.count == 32)
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
+#endif
     }
 
     @Test
     func testCreateTemporaryFileWithTemplate() throws {
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXX")
         defer {
             try? desc.close()
             try? CSFileManager.shared.removeItem(at: path)
         }
 
         #expect(path.starts(with: CSFileManager.shared.temporaryDirectory))
-        #expect(path.lastComponent?.string.count == 8)
+        #expect(path.lastComponent?.string.count == 9)
         #expect(path.lastComponent?.string.prefix(3) == "foo")
-        #expect(path.lastComponent?.string.suffix(5) != "XXXXX")
+        #expect(path.lastComponent?.string.suffix(6) != "XXXXXX")
         #expect(path.extension == nil)
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(template: "quxXXX")
         defer {
             close(fdInt)
@@ -203,27 +225,28 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
-
+#endif
     }
 
     @Test
     func testCreateTemporaryFileWithTemplateAndSuffix() throws {
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXX", suffix: "bar.baz")
         defer {
             try? desc.close()
             try? CSFileManager.shared.removeItem(at: path)
         }
 
         #expect(path.starts(with: CSFileManager.shared.temporaryDirectory))
-        #expect(path.lastComponent?.string.count == 15)
+        #expect(path.lastComponent?.string.count == 16)
         #expect(path.lastComponent?.string.prefix(3) == "foo")
-        #expect(path.lastComponent?.string.prefix(8).suffix(5) != "XXXXX")
+        #expect(path.lastComponent?.string.prefix(8).suffix(6) != "XXXXXX")
         #expect(path.lastComponent?.string.suffix(7) == "bar.baz")
         #expect(path.extension == "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
             template: "quxXXX",
             suffix: "quux.foo"
@@ -241,30 +264,32 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
+#endif
     }
-    
+
     @Test
     func testCreateTemporaryFileWithTemplateAndFallback() throws {
         let oldTmpDir = String(cString: getenv("TMPDIR"))
         defer { setenv("TMPDIR", oldTmpDir, 1) }
         unsetenv("TMPDIR")
 
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXX", suffix: "bar.baz")
         defer {
             try? desc.close()
             try? CSFileManager.shared.removeItem(at: path)
         }
 
         #expect(path.starts(with: "/tmp/"))
-        #expect(path.lastComponent?.string.count == 15)
+        #expect(path.lastComponent?.string.count == 16)
         #expect(path.lastComponent?.string.prefix(3) == "foo")
-        #expect(path.lastComponent?.string.prefix(8).suffix(5) != "XXXXX")
+        #expect(path.lastComponent?.string.prefix(8).suffix(6) != "XXXXXX")
         #expect(path.lastComponent?.string.suffix(7) == "bar.baz")
         #expect(path.extension == "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
             template: "quxXXX",
             suffix: "quux.foo"
@@ -282,6 +307,7 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
+#endif
     }
 
     @Test
@@ -290,22 +316,23 @@ struct CSFileManagerTests {
         defer { setenv("TMPDIR", oldTmpDir, 1) }
         setenv("TMPDIR", "/tmp", 1)
 
-        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXX", suffix: "bar.baz")
+        let (desc, path) = try CSFileManager.shared.createTemporaryFile(template: "fooXXXXXX", suffix: "bar.baz")
         defer {
             try? desc.close()
             try? CSFileManager.shared.removeItem(at: path)
         }
 
         #expect(path.starts(with: "/tmp/"))
-        #expect(path.lastComponent?.string.count == 15)
+        #expect(path.lastComponent?.string.count == 16)
         #expect(path.lastComponent?.string.prefix(3) == "foo")
-        #expect(path.lastComponent?.string.prefix(8).suffix(5) != "XXXXX")
+        #expect(path.lastComponent?.string.prefix(8).suffix(6) != "XXXXXX")
         #expect(path.lastComponent?.string.suffix(7) == "bar.baz")
         #expect(path.extension == "baz")
         try desc.writeAll("Foo Bar".data(using: .ascii)!)
 
         #expect(try String(data: Data(contentsOf: URL(filePath: path.string)), encoding: .ascii) == "Foo Bar")
 
+#if canImport(Darwin)
         let (fdInt, pathString) = try CSFileManager.shared.createTemporaryFileWithStringPath(
             template: "quxXXX",
             suffix: "quux.foo"
@@ -323,25 +350,28 @@ struct CSFileManagerTests {
         #expect(URL(filePath: pathString).pathExtension == "foo")
         #expect(write(fdInt, "Foo Bar Baz", 11) == 11)
         #expect(try String(data: Data(contentsOf: URL(filePath: pathString)), encoding: .ascii) == "Foo Bar Baz")
+#endif
     }
 
     @Test
     func testCreateTemporaryFileFailure() throws {
         #expect(
             #expect(throws: (any Swift.Error).self) {
-                try CSFileManager.shared.createTemporaryFile(template: "nonexist/dir/XXXX")
+                try CSFileManager.shared.createTemporaryFile(template: "nonexist/dir/XXXXXX")
             }?.isFileNotFoundError == true
         )
 
+#if canImport(Darwin)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try CSFileManager.shared.createTemporaryFileWithStringPath(template: "nonexist/dir/XXXX")
             }?.isFileNotFoundError == true
         )
+#endif
     }
 
     @Test
-    func testCreateItemReplacementDirectory() throws {
+    func testCreateItemReplacementDirectoryOnBootVolume() throws {
         func testFilePath(target: FilePath?, mode: mode_t, closure: (FilePath) throws -> Void) throws {
             let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
             defer { try? CSFileManager.shared.removeItem(at: path) }
@@ -349,73 +379,130 @@ struct CSFileManagerTests {
             try closure(path)
         }
 
-        func testString(target: String?, mode: mode_t, closure: (String) throws -> Void) throws {
-            let path = try CSFileManager.shared.createItemReplacementDirectoryWithStringPath(forPath: target, mode: mode)
-            defer { try? CSFileManager.shared.removeItem(atPath: path) }
-
-            try closure(path)
-        }
-
-        let imageMount = FilePath(Self.diskImages.values.first!.mountPoint.path)
-        let imageParentDir = imageMount.appending(UUID().uuidString)
-        let imageTargetFile = imageParentDir.appending(UUID().uuidString)
-
-        try CSFileManager.shared.createDirectory(at: imageParentDir, recursively: true)
-        defer { try? CSFileManager.shared.removeItem(at: imageParentDir) }
-
-        try Data().write(to: URL(filePath: imageTargetFile.string))
-
         try testFilePath(target: nil, mode: 0o755) { path throws in
             #expect(path.starts(with: CSFileManager.shared.temporaryDirectory))
             #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o755)
         }
-        
+
         try testFilePath(target: FilePath(NSHomeDirectory()), mode: 0o600) { path throws in
             #expect(path.starts(with: CSFileManager.shared.temporaryDirectory))
             #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o600)
         }
 
-        try testFilePath(target: imageTargetFile, mode: 0o700) { path throws in
-            #expect(path.starts(with: imageParentDir))
-            #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
+#if canImport(Darwin)
+        func testString(target: String?, mode: mode_t, closure: (String) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectory(forPath: target, mode: mode)
+            defer { try? CSFileManager.shared.removeItem(atPath: path) }
+
+            try closure(path)
         }
 
         try testString(target: nil, mode: 0o755) { path throws in
             #expect(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
             #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o755)
         }
-        
+
         try testString(target: NSHomeDirectory(), mode: 0o600) { path throws in
             #expect(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
             #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o600)
         }
-
-        try testString(target: imageTargetFile.string, mode: 0o700) { path throws in
-            #expect(path.starts(with: imageParentDir.string))
-            #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
-        }
+#endif
 
 #if Foundation
         func testURL(target: URL?, mode: mode_t, closure: (URL) throws -> Void) throws {
-            let path = try CSFileManager.shared.createItemReplacementDirectoryWithURL(for: target, mode: mode)
+            let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
             defer { try? CSFileManager.shared.removeItem(at: path) }
 
             try closure(path)
         }
 
         try testURL(target: nil, mode: 0o755) { url throws in
-            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
             #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o755)
         }
 
         try testURL(target: FileManager.default.homeDirectoryForCurrentUser, mode: 0o600) { url throws in
-            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
             #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o600)
+        }
+#endif
+    }
+
+    @Test(arguments: withFixtures.images)
+    func testCreateItemReplacementDirectoryOnOtherVolume(diskImage: DiskImage) throws {
+        let imageMount = FilePath(diskImage.mountPoint.path)
+        let imageParentDir = imageMount.appending(UUID().uuidString)
+
+        try CSFileManager.shared.createDirectory(at: imageParentDir, recursively: true)
+        defer { try? CSFileManager.shared.removeItem(at: imageParentDir) }
+
+        let imageTargetFile = imageParentDir.appending(UUID().uuidString)
+        try Data().write(to: URL(filePath: imageTargetFile.string))
+
+        func testFilePath(target: FilePath?, mode: mode_t, closure: (FilePath) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
+            defer { try? CSFileManager.shared.removeItem(at: path) }
+
+            try closure(path)
+        }
+
+#if canImport(Darwin)
+        func testString(target: String?, mode: mode_t, closure: (String) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectory(forPath: target, mode: mode)
+            defer { try? CSFileManager.shared.removeItem(atPath: path) }
+
+            try closure(path)
+        }
+#endif
+
+            try testFilePath(target: imageTargetFile, mode: 0o700) { path throws in
+                #expect(path.starts(with: imageParentDir))
+
+                if diskImage.info.fileSystem.supportsPermissions {
+                    #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
+                }
+            }
+
+#if canImport(Darwin)
+            try testString(target: imageTargetFile.string, mode: 0o700) { path throws in
+                #expect(path.starts(with: imageParentDir.string))
+
+                if diskImage.info.fileSystem.supportsPermissions {
+                    #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
+                }
+            }
+#endif
+
+#if Foundation
+        func testURL(target: URL?, mode: mode_t, closure: (URL) throws -> Void) throws {
+            let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
+            defer { try? CSFileManager.shared.removeItem(at: path) }
+
+            try closure(path)
+        }
+
+        try testURL(target: nil, mode: 0o755) { url throws in
+            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o755)
+            }
+        }
+
+        try testURL(target: FileManager.default.homeDirectoryForCurrentUser, mode: 0o600) { url throws in
+            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o600)
+            }
         }
 
         try testURL(target: URL(filePath: imageTargetFile.string), mode: 0o700) { url throws in
             #expect(url.path.starts(with: imageParentDir.string))
-            #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o700)
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o700)
+            }
         }
 #endif
     }
@@ -423,10 +510,12 @@ struct CSFileManagerTests {
     @Test
     func testReachablePaths() throws {
         #expect(try CSFileManager.shared.itemIsReachable(at: "/bin/ls"))
-        #expect(try CSFileManager.shared.itemIsReachable(atPath: "/bin/ls"))
-
         #expect(try CSFileManager.shared.itemIsReachable(at: "/usr/bin"))
+
+#if canImport(Darwin)
+        #expect(try CSFileManager.shared.itemIsReachable(atPath: "/bin/ls"))
         #expect(try CSFileManager.shared.itemIsReachable(atPath: "/usr/bin"))
+#endif
 
 #if Foundation
         #expect(try CSFileManager.shared.itemIsReachable(at: URL(filePath: "/bin/ls")))
@@ -439,7 +528,9 @@ struct CSFileManagerTests {
         let bogusPath = "/bin/does_not_exist.\(UUID().uuidString)"
 
         #expect(try !CSFileManager.shared.itemIsReachable(at: FilePath(bogusPath)))
+#if canImport(Darwin)
         #expect(try !CSFileManager.shared.itemIsReachable(atPath: bogusPath))
+#endif
 #if Foundation
         #expect(try !CSFileManager.shared.itemIsReachable(at: URL(filePath: bogusPath)))
 #endif
@@ -459,7 +550,9 @@ struct CSFileManagerTests {
         try Data().write(to: URL(filePath: unreachableFile.string))
 
         #expect(try CSFileManager.shared.itemIsReachable(at: unreachableFile))
+#if canImport(Darwin)
         #expect(try CSFileManager.shared.itemIsReachable(atPath: unreachableFile.string))
+#endif
 
         try callPOSIXFunction(expect: .zero) { chmod(noPermissionsDir.string, 0o400) }
 
@@ -469,11 +562,13 @@ struct CSFileManagerTests {
             }?.isPermissionError == true
         )
         
+#if canImport(Darwin)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try CSFileManager.shared.itemIsReachable(atPath: unreachableFile.string)
             }?.isPermissionError == true
         )
+#endif
 
 #if Foundation
         #expect(
@@ -488,13 +583,20 @@ struct CSFileManagerTests {
     func testGetTypeOfItem() throws {
         func checkType(path: FilePath, expectedType: CSFileManager.FileType, canOpen: Bool = true) throws {
             try #expect(CSFileManager.shared.typeOfItem(at: path) == expectedType)
+#if canImport(Darwin)
             try #expect(CSFileManager.shared.typeOfItem(atPath: path.string) == expectedType)
+#endif
 #if Foundation
             try #expect(CSFileManager.shared.typeOfItem(at: URL(filePath: path.string)) == expectedType)
 #endif
 
             if canOpen {
+#if canImport(Darwin)
                 let desc = try FileDescriptor.open(path, .readOnly, options: .symlink)
+#else
+                
+                let desc = try FileDescriptor.open(path, .readOnly, options: [.noFollow, .init(rawValue: 0o10000000)])
+#endif
                 defer { try? desc.close() }
                 
                 try #expect(CSFileManager.shared.typeOfItem(fileDescriptor: desc) == expectedType)
@@ -503,17 +605,26 @@ struct CSFileManagerTests {
         }
 
         try checkType(path: "/bin/ls", expectedType: .regular)
-        try checkType(path: "/bin", expectedType: .directory)
-        try checkType(path: "/etc", expectedType: .symbolicLink)
+        try checkType(path: "/usr/bin", expectedType: .directory)
         try checkType(path: "/dev/null", expectedType: .characterSpecial)
+#if canImport(Darwin)
+        try checkType(path: "/etc", expectedType: .symbolicLink)
         try checkType(path: "/dev/disk0", expectedType: .blockSpecial, canOpen: false)
+#else
+        try checkType(path: "/bin", expectedType: .symbolicLink)
+        try checkType(path: "/dev/loop0", expectedType: .blockSpecial, canOpen: false)
+#endif
 
         let fifoPath = CSFileManager.shared.temporaryDirectory.appending("myfifo")
         mkfifo(fifoPath.string, 0o755)
         defer { try? CSFileManager.shared.removeItem(at: fifoPath) }
         try checkType(path: fifoPath, expectedType: .fifo, canOpen: false)
 
+#if canImport(Darwin)
         let socket = socket(PF_LOCAL, SOCK_STREAM, 0)
+#else
+        let socket = socket(PF_LOCAL, Int32(bitPattern: SOCK_STREAM.rawValue), 0)
+#endif
         defer { close(socket) }
         try #expect(CSFileManager.shared.typeOfItem(fileDescriptor: FileDescriptor(rawValue: socket)) == .socket)
         try #expect(CSFileManager.shared.typeOfItem(fileDescriptor: socket) == .socket)
@@ -523,12 +634,14 @@ struct CSFileManagerTests {
                 try CSFileManager.shared.typeOfItem(at: "/this/should/not/exist")
             }?.isFileNotFoundError == true
         )
-        
+
+#if canImport(Darwin)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try CSFileManager.shared.typeOfItem(atPath: "/this/should/not/exist")
             }?.isFileNotFoundError == true
         )
+#endif
 
 #if Foundation
         #expect(
@@ -566,6 +679,7 @@ struct CSFileManagerTests {
             try Set(manager.contentsOfDirectory(at: root, recursively: true)) == [child1, child2, grandchild1, grandchild2, grandchild3]
         )
         
+#if canImport(Darwin)
         #expect(try Set(manager.contentsOfDirectory(atPath: root.string)) == [childName1, childName2])
         #expect(try Set(manager.contentsOfDirectory(atPath: child1.string)) == [grandchildName1, grandchildName2])
         #expect(try Set(manager.contentsOfDirectory(atPath: child2.string)) == [grandchildName3])
@@ -575,6 +689,7 @@ struct CSFileManagerTests {
                 childName2, "\(childName2)/\(grandchildName3)"
             ]
         )
+#endif
 
 #if Foundation
         #expect(
@@ -590,7 +705,9 @@ struct CSFileManagerTests {
             ]
         )
         #expect(
-            try Set(manager.contentsOfDirectory(at: URL(filePath: child2.string))) == [URL(filePath: grandchild3, directoryHint: .isDirectory)]
+            try Set(manager.contentsOfDirectory(at: URL(filePath: child2.string))) == [
+                URL(filePath: grandchild3.string, directoryHint: .isDirectory)
+            ]
         )
         #expect(
             try Set(manager.contentsOfDirectory(at: URL(filePath: root.string), recursively: true)) == [
@@ -608,8 +725,10 @@ struct CSFileManagerTests {
     func testEnumerateNonexistentPath() throws {
         let nonexistentPath = FilePath("/does/not/exist/\(UUID().uuidString)")
 
-        #expect(try Set(CSFileManager.shared.contentsOfDirectory(atPath: nonexistentPath.string)) == [])
         #expect(try Set(CSFileManager.shared.contentsOfDirectory(at: nonexistentPath)) == [])
+#if canImport(Darwin)
+        #expect(try Set(CSFileManager.shared.contentsOfDirectory(atPath: nonexistentPath.string)) == [])
+#endif
 #if Foundation
         #expect(try Set(CSFileManager.shared.contentsOfDirectory(at: URL(filePath: nonexistentPath.string))) == [])
 #endif
@@ -639,7 +758,8 @@ struct CSFileManagerTests {
         #expect(try FileManager.default.attributesOfItem(atPath: midDir.string)[.posixPermissions] as? mode_t == 0o700)
         #expect(try FileManager.default.attributesOfItem(atPath: deepDir.string)[.posixPermissions] as? mode_t == 0o700)
     }
-    
+
+#if canImport(Darwin)
     @Test
     func testCreateDirectoryWithStringPaths() throws {
         let testDir = CSFileManager.shared.temporaryDirectory.appending(UUID().uuidString).string
@@ -664,6 +784,7 @@ struct CSFileManagerTests {
         #expect(try FileManager.default.attributesOfItem(atPath: midDir)[.posixPermissions] as? mode_t == 0o700)
         #expect(try FileManager.default.attributesOfItem(atPath: deepDir)[.posixPermissions] as? mode_t == 0o700)
     }
+#endif
 
 #if Foundation
     @Test
@@ -694,7 +815,8 @@ struct CSFileManagerTests {
 
     @Test
     func testCopyItems() throws {
-        let testDir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let tempDir = URL(filePath: CSFileManager.shared.temporaryDirectory.string, directoryHint: .isDirectory)
+        let testDir = tempDir.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: testDir) }
 
@@ -703,14 +825,16 @@ struct CSFileManagerTests {
 
         let fileContents = "some file contents".data(using: .utf8)!
         let attribute = ExtendedAttribute(
-            key: "com.charlessoft.CSFileManager.test-attribute",
+            key: "user.com.charlessoft.CSFileManager.test-attribute",
             data: "arbitrary attribute".data(using: .utf8)!
         )
 
+#if canImport(Darwin)
         let rsrcFork = ExtendedAttribute(
             key: XATTR_RESOURCEFORK_NAME,
             data: "you never know, something could use this".data(using: .utf8)!
         )
+#endif
 
         func setupFile(src: URL, dst: URL) throws {
             let srcDotfile = src.deletingLastPathComponent().appending(path: "._\(src.lastPathComponent)")
@@ -723,7 +847,9 @@ struct CSFileManagerTests {
 
             try fileContents.write(to: src)
             try attribute.write(to: FilePath(src.path))
+#if canImport(Darwin)
             try rsrcFork.write(to: FilePath(src.path))
+#endif
         }
 
         func setupFolder(src: URL, dst: URL) throws {
@@ -744,7 +870,11 @@ struct CSFileManagerTests {
         func verifyFile(src: URL, dst: URL) throws {
             #expect(try CSFileManager.shared.itemIsReachable(at: FilePath(src.path)))
             #expect(try Data(contentsOf: dst) == fileContents)
+#if canImport(Darwin)
             #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute, rsrcFork])
+#else
+            #expect(try Set(ExtendedAttribute.list(at: FilePath(dst.path))) == [attribute])
+#endif
         }
 
         func verifyFolder(src: URL, dst: URL) throws {
@@ -759,12 +889,14 @@ struct CSFileManagerTests {
                 try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))
             }?.isFileNotFoundError == true
         )
-        
+
+#if canImport(Darwin)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)
             }?.isFileNotFoundError == true
         )
+#endif
 
 #if Foundation
         #expect(
@@ -778,9 +910,11 @@ struct CSFileManagerTests {
         try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))
         try verifyFile(src: src, dst: dst)
 
+#if canImport(Darwin)
         try setupFile(src: src, dst: dst)
         try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)
         try verifyFile(src: src, dst: dst)
+#endif
 
 #if Foundation
         try setupFile(src: src, dst: dst)
@@ -792,9 +926,11 @@ struct CSFileManagerTests {
         try CSFileManager.shared.copyItem(at: FilePath(src.path), to: FilePath(dst.path))
         try verifyFolder(src: src, dst: dst)
 
+#if canImport(Darwin)
         try setupFolder(src: src, dst: dst)
         try CSFileManager.shared.copyItem(atPath: src.path, toPath: dst.path)
         try verifyFolder(src: src, dst: dst)
+#endif
 
 #if Foundation
         try setupFolder(src: src, dst: dst)
@@ -901,11 +1037,13 @@ struct CSFileManagerTests {
             }?.isFileNotFoundError == true
         )
 
+#if canImport(Darwin)
         #expect(
             #expect(throws: (any Swift.Error).self) {
                 try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)
             }?.isFileNotFoundError == true
         )
+#endif
 
 #if Foundation
         #expect(
@@ -919,9 +1057,11 @@ struct CSFileManagerTests {
         try CSFileManager.shared.moveItem(at: FilePath(src.path), to: FilePath(dst.path))
         try verifyFile(src: src, dst: dst)
 
+#if canImport(Darwin)
         try setupFile(src: src, dst: dst)
         try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)
         try verifyFile(src: src, dst: dst)
+#endif
 
 #if Foundation
         try setupFile(src: src, dst: dst)
@@ -933,9 +1073,11 @@ struct CSFileManagerTests {
         try CSFileManager.shared.moveItem(at: FilePath(src.path), to: FilePath(dst.path))
         try verifyFolder(src: src, dst: dst)
 
+#if canImport(Darwin)
         try setupFolder(src: src, dst: dst)
         try CSFileManager.shared.moveItem(atPath: src.path, toPath: dst.path)
         try verifyFolder(src: src, dst: dst)
+#endif
 
 #if Foundation
         try setupFolder(src: src, dst: dst)
@@ -962,6 +1104,7 @@ struct CSFileManagerTests {
         try CSFileManager.shared.removeItem(at: child, recursively: true)
         self.expectNoSuchFile(child)
 
+#if canImport(Darwin)
         try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: child.string))
         #expect(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: false)
@@ -971,6 +1114,7 @@ struct CSFileManagerTests {
         #expect(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
         self.expectNoSuchFile(child)
+#endif
 
 #if Foundation
         try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: child.string))
@@ -1003,6 +1147,7 @@ struct CSFileManagerTests {
         try CSFileManager.shared.removeItem(at: child, recursively: true)
         self.expectNoSuchFile(child)
 
+#if canImport(Darwin)
         try CSFileManager.shared.createDirectory(at: child)
         #expect(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: false)
@@ -1012,6 +1157,7 @@ struct CSFileManagerTests {
         #expect(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
         self.expectNoSuchFile(child)
+#endif
 
 #if Foundation
         try CSFileManager.shared.createDirectory(at: child)
@@ -1046,9 +1192,11 @@ struct CSFileManagerTests {
         #expect(throws: Errno.directoryNotEmpty) {
             try CSFileManager.shared.removeItem(at: child, recursively: false)
         }
+#if canImport(Darwin)
         #expect(throws: Errno.directoryNotEmpty) {
             try CSFileManager.shared.removeItem(atPath: child.string, recursively: false)
         }
+#endif
 #if Foundation
         #expect(throws: Errno.directoryNotEmpty) {
             try CSFileManager.shared.removeItem(at: URL(filePath: child.string), recursively: false)
@@ -1059,11 +1207,13 @@ struct CSFileManagerTests {
         try CSFileManager.shared.removeItem(at: child, recursively: true)
         self.expectNoSuchFile(child)
 
+#if canImport(Darwin)
         try CSFileManager.shared.createDirectory(at: child)
         try "testing 1 2 3".data(using: .utf8)!.write(to: URL(filePath: grandchild.string))
         #expect(try URL(filePath: child.string).checkResourceIsReachable())
         try CSFileManager.shared.removeItem(atPath: child.string, recursively: true)
         self.expectNoSuchFile(child)
+#endif
 
 #if Foundation
         try CSFileManager.shared.createDirectory(at: child)
