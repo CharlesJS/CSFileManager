@@ -214,11 +214,23 @@ public struct CSFileManager: Sendable {
 
         if let destination,
            let tempVolume = try FileInfo(at: tempPath, keys: .fileSystemID).fileSystemID,
-           try FileInfo(at: destination, keys: .fileSystemID).fileSystemID != tempVolume {
+           try self.getFileSystemID(for: destination) != tempVolume {
             return destination.removingLastComponent().appending(self.generateItemReplacementDirectoryName())
         }
 
         return tempPath.appending(self.generateItemReplacementDirectoryName())
+    }
+
+    private func getFileSystemID(for path: FilePath) throws -> FileInfo.FileSystemID? {
+        do {
+            return try FileInfo(at: path, keys: .fileSystemID).fileSystemID
+        } catch {
+            if error.isFileNotFoundError {
+                return try self.getFileSystemID(for: path.removingLastComponent())
+            } else {
+                throw error
+            }
+        }
     }
 
 #if canImport(Darwin)
@@ -227,9 +239,8 @@ public struct CSFileManager: Sendable {
             let tempPath = self.temporaryDirectoryStringPath
 
             if let destination,
-               let destVolume = (try? FileInfo(atPath: destination, keys: .fileSystemID))?.fileSystemID,
                let tempVolume = (try? FileInfo(atPath: tempPath, keys: .fileSystemID))?.fileSystemID,
-               destVolume != tempVolume {
+               try self.getFileSystemID(forPath: destination) != tempVolume {
                 let parent = destination.lastIndex(of: "/").map { destination[..<$0] } ?? tempPath[...]
 
                 return "\(parent)/\(self.generateItemReplacementDirectoryName())"
@@ -239,6 +250,18 @@ public struct CSFileManager: Sendable {
         }
 
         return try self.getItemReplacementDirectory(for: destination.map { FilePath($0) }).string
+    }
+
+    private func getFileSystemID(forPath path: String) throws -> FileInfo.FileSystemID? {
+        do {
+            return try FileInfo(atPath: path, keys: .fileSystemID).fileSystemID
+        } catch {
+            if error.isFileNotFoundError, let slashRange = path.lastIndex(of: "/") {
+                return try self.getFileSystemID(forPath: String(path[..<slashRange]))
+            } else {
+                throw error
+            }
+        }
     }
 #endif
 
