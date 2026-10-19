@@ -389,6 +389,11 @@ struct CSFileManagerTests {
             #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o600)
         }
 
+        try testFilePath(target: FilePath(NSHomeDirectory()).appending(UUID().uuidString), mode: 0o700) { path throws in
+            #expect(path.starts(with: CSFileManager.shared.temporaryDirectory))
+            #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
+        }
+
 #if canImport(Darwin)
         func testString(target: String?, mode: mode_t, closure: (String) throws -> Void) throws {
             let path = try CSFileManager.shared.createItemReplacementDirectory(forPath: target, mode: mode)
@@ -405,6 +410,11 @@ struct CSFileManagerTests {
         try testString(target: NSHomeDirectory(), mode: 0o600) { path throws in
             #expect(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
             #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o600)
+        }
+
+        try testString(target: NSHomeDirectory() + "/" + UUID().uuidString, mode: 0o700) { path throws in
+            #expect(path.starts(with: CSFileManager.shared.temporaryDirectoryStringPath))
+            #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
         }
 #endif
 
@@ -425,6 +435,14 @@ struct CSFileManagerTests {
             #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
             #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o600)
         }
+
+        try testURL(
+            target: FileManager.default.homeDirectoryForCurrentUser.appending(path: UUID().uuidString),
+            mode: 0o700
+        ) { url throws in
+            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
+            #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o700)
+        }
 #endif
     }
 
@@ -438,6 +456,8 @@ struct CSFileManagerTests {
 
         let imageTargetFile = imageParentDir.appending(UUID().uuidString)
         try Data().write(to: URL(filePath: imageTargetFile.string))
+
+        let nonexistentFile = imageParentDir.appending(UUID().uuidString)
 
         func testFilePath(target: FilePath?, mode: mode_t, closure: (FilePath) throws -> Void) throws {
             let path = try CSFileManager.shared.createItemReplacementDirectory(for: target, mode: mode)
@@ -455,22 +475,38 @@ struct CSFileManagerTests {
         }
 #endif
 
-            try testFilePath(target: imageTargetFile, mode: 0o700) { path throws in
-                #expect(path.starts(with: imageParentDir))
+        try testFilePath(target: imageTargetFile, mode: 0o700) { path throws in
+            #expect(path.starts(with: imageParentDir))
 
-                if diskImage.info.fileSystem.supportsPermissions {
-                    #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
-                }
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
             }
+        }
+
+        try testFilePath(target: nonexistentFile, mode: 0o700) { path throws in
+            #expect(path.starts(with: imageParentDir))
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: path, keys: .permissionsMode).permissionsMode == 0o700)
+            }
+        }
 
 #if canImport(Darwin)
-            try testString(target: imageTargetFile.string, mode: 0o700) { path throws in
-                #expect(path.starts(with: imageParentDir.string))
+        try testString(target: imageTargetFile.string, mode: 0o700) { path throws in
+            #expect(path.starts(with: imageParentDir.string))
 
-                if diskImage.info.fileSystem.supportsPermissions {
-                    #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
-                }
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
             }
+        }
+
+        try testString(target: nonexistentFile.string, mode: 0o700) { path throws in
+            #expect(path.starts(with: imageParentDir.string))
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(atPath: path, keys: .permissionsMode).permissionsMode == 0o700)
+            }
+        }
 #endif
 
 #if Foundation
@@ -481,23 +517,15 @@ struct CSFileManagerTests {
             try closure(path)
         }
 
-        try testURL(target: nil, mode: 0o755) { url throws in
-            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
-
-            if diskImage.info.fileSystem.supportsPermissions {
-                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o755)
-            }
-        }
-
-        try testURL(target: FileManager.default.homeDirectoryForCurrentUser, mode: 0o600) { url throws in
-            #expect(url.path.starts(with: CSFileManager.shared.temporaryDirectory.string))
-
-            if diskImage.info.fileSystem.supportsPermissions {
-                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o600)
-            }
-        }
-
         try testURL(target: URL(filePath: imageTargetFile.string), mode: 0o700) { url throws in
+            #expect(url.path.starts(with: imageParentDir.string))
+
+            if diskImage.info.fileSystem.supportsPermissions {
+                #expect(try FileInfo(at: url, keys: .permissionsMode).permissionsMode == 0o700)
+            }
+        }
+
+        try testURL(target: URL(filePath: nonexistentFile.string), mode: 0o700) { url throws in
             #expect(url.path.starts(with: imageParentDir.string))
 
             if diskImage.info.fileSystem.supportsPermissions {
